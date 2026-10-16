@@ -1,0 +1,11 @@
+Readable_Feature,SHAP_Value,Absolute_SHAP
+Weather Conditions,1.839715,1.839715
+Speed Limit,0.42108512,0.42108512
+Light Conditions,0.32598317,0.32598317
+Road Surface Conditions,0.16574425,0.16574425
+Day of Collision,-0.054647394,0.054647394
+Policing Area,0.03803651,0.03803651
+Carriageway Type,-0.028878057,0.028878057
+Junction Detail,0.016446719,0.016446719
+Hour of Collision,0.012733257,0.012733257
+Junction Control,0.011718968,0.011718968

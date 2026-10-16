@@ -1,0 +1,77 @@
+{
+    "accuracy": 0.984186,
+    "accuracy_percent": 98.42,
+    "classes": [
+        "HIGH",
+        "LOW",
+        "MEDIUM"
+    ],
+    "confusion_matrix": [
+        [
+            17288,
+            110,
+            0
+        ],
+        [
+            16,
+            361,
+            74
+        ],
+        [
+            0,
+            90,
+            399
+        ]
+    ],
+    "classification_report": {
+        "LOW": {
+            "precision": 0.9990753582986592,
+            "recall": 0.9936774341878377,
+            "f1-score": 0.9963690853553109,
+            "support": 17398.0
+        },
+        "MEDIUM": {
+            "precision": 0.64349376114082,
+            "recall": 0.8004434589800443,
+            "f1-score": 0.7134387351778656,
+            "support": 451.0
+        },
+        "HIGH": {
+            "precision": 0.8435517970401691,
+            "recall": 0.8159509202453987,
+            "f1-score": 0.8295218295218295,
+            "support": 489.0
+        },
+        "accuracy": 0.9841858436034464,
+        "macro avg": {
+            "precision": 0.8287069721598828,
+            "recall": 0.8700239378044269,
+            "f1-score": 0.8464432166850021,
+            "support": 18338.0
+        },
+        "weighted avg": {
+            "precision": 0.9861830951416308,
+            "recall": 0.9841858436034464,
+            "f1-score": 0.9849616311055236,
+            "support": 18338.0
+        }
+    },
+    "training_rows": 73348,
+    "testing_rows": 18338,
+    "features": [
+        "hour",
+        "road_type",
+        "lanes",
+        "traffic_signal",
+        "weather",
+        "visibility",
+        "temperature",
+        "traffic_density",
+        "vehicles_involved",
+        "is_peak_hour",
+        "festival",
+        "area",
+        "road_name",
+        "congestion_level"
+    ]
+}

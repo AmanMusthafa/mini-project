@@ -1,0 +1,134 @@
+{
+  "areas": [
+    "Edappally",
+    "Fort Kochi",
+    "Kadavanthra",
+    "Kakkanad",
+    "Mattancherry",
+    "Palarivattom",
+    "Vyttila"
+  ],
+  "area_roads": {
+    "Edappally": [
+      "Edappally Junction",
+      "Edappally North",
+      "Edappally Toll Junction",
+      "Konthuruthy Road",
+      "LuLu Mall Access Road",
+      "NH 66 Bypass",
+      "Rajagiri Road",
+      "Seaport Airport Road"
+    ],
+    "Fort Kochi": [
+      "Beach Road Fort Kochi",
+      "Calvathy Road",
+      "Fort Kochi Ferry Road",
+      "Napier Street",
+      "Princess Street",
+      "Ridsdale Road",
+      "Tower Road",
+      "Willingdon Island Road"
+    ],
+    "Kadavanthra": [
+      "Bristow Road",
+      "Chittoor Road",
+      "Convent Road",
+      "Judges Avenue",
+      "Kadavanthra Junction",
+      "Kasturi Ranga Rd",
+      "MG Road Kadavanthra",
+      "Ravipuram Road",
+      "Sahodaran Ayyappan Road",
+      "Shanmugham Road"
+    ],
+    "Kakkanad": [
+      "CSEZ Road",
+      "High Court Road Kakkanad",
+      "Infopark Expressway",
+      "Infopark Road Phase 1",
+      "Infopark Road Phase 2",
+      "Kakkanad Main Road",
+      "Kolenchery Road",
+      "Thrippunithura Road"
+    ],
+    "Mattancherry": [
+      "Bazaar Road",
+      "Dutch Cemetery Road",
+      "Harbour Road",
+      "Jew Town Road",
+      "Mattancherry Palace Road",
+      "Mattancherry Road",
+      "Pallipuram Road",
+      "Thoppumpady Road"
+    ],
+    "Palarivattom": [
+      "Banerji Road",
+      "Elamkulam Road",
+      "Kaloor Palarivattom Rd",
+      "NH 85 Palarivattom",
+      "Palarivattom Junction",
+      "Pullepady Road",
+      "Vyttila Palarivattom Rd"
+    ],
+    "Vyttila": [
+      "Aroor Bypass",
+      "Chilavannoor Road",
+      "Kundannoor Bridge Road",
+      "NH 66 Vyttila",
+      "Pachalam Road",
+      "SA Road Vyttila",
+      "Vyttila Junction",
+      "Vyttila Mobility Hub Road"
+    ]
+  },
+  "road_types": [
+    "highway",
+    "urban"
+  ],
+  "weathers": [
+    "clear",
+    "fog",
+    "rain"
+  ],
+  "visibilities": [
+    "high",
+    "low",
+    "medium"
+  ],
+  "traffic_densities": [
+    "high",
+    "low"
+  ],
+  "causes": [
+    "distraction",
+    "drunk driving",
+    "overspeeding",
+    "poor road",
+    "weather"
+  ],
+  "days_of_week": [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday"
+  ],
+  "cat_features": [
+    "area",
+    "road_name",
+    "road_type",
+    "weather",
+    "visibility",
+    "traffic_density",
+    "cause",
+    "day_of_week"
+  ],
+  "num_features": [
+    "lanes",
+    "traffic_signal",
+    "hour",
+    "vehicles_involved"
+  ]
+}

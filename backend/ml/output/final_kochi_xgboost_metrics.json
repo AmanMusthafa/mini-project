@@ -1,0 +1,36 @@
+{
+    "model": "XGBoost",
+    "dataset": "Kochi Accident Severity Dataset Final",
+    "total_records": 50000,
+    "training_records": 34000,
+    "validation_records": 6000,
+    "test_records": 10000,
+    "accuracy": 0.7251,
+    "balanced_accuracy": 0.6776,
+    "macro_f1": 0.6895,
+    "weighted_f1": 0.7217,
+    "macro_precision": 0.7057,
+    "macro_recall": 0.6776,
+    "confusion_matrix": [
+        [
+            1016,
+            567,
+            43
+        ],
+        [
+            326,
+            1696,
+            1070
+        ],
+        [
+            20,
+            723,
+            4539
+        ]
+    ],
+    "classes": [
+        "Fatal",
+        "Major",
+        "Minor"
+    ]
+}

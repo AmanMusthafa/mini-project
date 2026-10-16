@@ -1,0 +1,52 @@
+[
+    {
+        "Readable_Feature":"Weather Conditions",
+        "SHAP_Value":1.839715004,
+        "Absolute_SHAP":1.839715004
+    },
+    {
+        "Readable_Feature":"Speed Limit",
+        "SHAP_Value":0.4210851192,
+        "Absolute_SHAP":0.4210851192
+    },
+    {
+        "Readable_Feature":"Light Conditions",
+        "SHAP_Value":0.3259831667,
+        "Absolute_SHAP":0.3259831667
+    },
+    {
+        "Readable_Feature":"Road Surface Conditions",
+        "SHAP_Value":0.1657442451,
+        "Absolute_SHAP":0.1657442451
+    },
+    {
+        "Readable_Feature":"Day of Collision",
+        "SHAP_Value":-0.0546473935,
+        "Absolute_SHAP":0.0546473935
+    },
+    {
+        "Readable_Feature":"Policing Area",
+        "SHAP_Value":0.0380365103,
+        "Absolute_SHAP":0.0380365103
+    },
+    {
+        "Readable_Feature":"Carriageway Type",
+        "SHAP_Value":-0.0288780574,
+        "Absolute_SHAP":0.0288780574
+    },
+    {
+        "Readable_Feature":"Junction Detail",
+        "SHAP_Value":0.0164467189,
+        "Absolute_SHAP":0.0164467189
+    },
+    {
+        "Readable_Feature":"Hour of Collision",
+        "SHAP_Value":0.0127332574,
+        "Absolute_SHAP":0.0127332574
+    },
+    {
+        "Readable_Feature":"Junction Control",
+        "SHAP_Value":0.0117189679,
+        "Absolute_SHAP":0.0117189679
+    }
+]

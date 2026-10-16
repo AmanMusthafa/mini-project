@@ -1,0 +1,42 @@
+{
+    "features": [
+        "hour",
+        "minute",
+        "day_of_week",
+        "is_weekend",
+        "is_rush_hour",
+        "is_night",
+        "time_period",
+        "area",
+        "road_name",
+        "road_type",
+        "lanes",
+        "junction_type",
+        "traffic_signal",
+        "road_surface",
+        "lighting",
+        "speed_limit_kmph",
+        "vehicle_count",
+        "vehicle_volume_est",
+        "current_speed_kmph",
+        "free_flow_speed_kmph",
+        "congestion_score",
+        "congestion_level",
+        "weather_condition",
+        "rainfall_mm",
+        "visibility_m",
+        "temperature_c",
+        "humidity_pct",
+        "cause",
+        "speed_difference",
+        "speed_ratio",
+        "speed_limit_difference",
+        "vehicles_per_lane"
+    ],
+    "target": "accident_severity",
+    "classes": [
+        "Fatal",
+        "Major",
+        "Minor"
+    ]
+}

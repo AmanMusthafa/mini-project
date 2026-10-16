@@ -1,0 +1,65 @@
+{
+    "predicted_severity": "Minor",
+    "top_features": [
+        {
+            "feature": "speed: limit_difference",
+            "shap_value": -0.337726
+        },
+        {
+            "feature": "vehicle: count",
+            "shap_value": 0.281367
+        },
+        {
+            "feature": "cause: Vehicle Malfunction",
+            "shap_value": 0.198243
+        },
+        {
+            "feature": "speed: limit_kmph",
+            "shap_value": -0.17229
+        },
+        {
+            "feature": "traffic: signal_No",
+            "shap_value": -0.134584
+        },
+        {
+            "feature": "junction: type_4-Way Junction",
+            "shap_value": -0.114824
+        },
+        {
+            "feature": "is: rush_hour",
+            "shap_value": 0.107773
+        },
+        {
+            "feature": "lanes",
+            "shap_value": -0.091397
+        },
+        {
+            "feature": "road: surface_Dry",
+            "shap_value": 0.085324
+        },
+        {
+            "feature": "temperature: c",
+            "shap_value": 0.061036
+        },
+        {
+            "feature": "weather: condition_Clear",
+            "shap_value": -0.055114
+        },
+        {
+            "feature": "lighting: Daylight",
+            "shap_value": 0.037843
+        },
+        {
+            "feature": "road: type_Local",
+            "shap_value": -0.032447
+        },
+        {
+            "feature": "minute",
+            "shap_value": 0.032149
+        },
+        {
+            "feature": "junction: type_No Junction",
+            "shap_value": -0.030199
+        }
+    ]
+}

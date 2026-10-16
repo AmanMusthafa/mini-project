@@ -1,0 +1,52 @@
+{
+    "predicted_severity": "Slight",
+    "top_positive_factors": [
+        {
+            "feature": "Weather Conditions",
+            "shap_value": 1.839715
+        },
+        {
+            "feature": "Speed Limit",
+            "shap_value": 0.421085
+        },
+        {
+            "feature": "Light Conditions",
+            "shap_value": 0.325983
+        },
+        {
+            "feature": "Road Surface Conditions",
+            "shap_value": 0.165744
+        },
+        {
+            "feature": "Policing Area",
+            "shap_value": 0.038037
+        },
+        {
+            "feature": "Junction Detail",
+            "shap_value": 0.016447
+        },
+        {
+            "feature": "Hour of Collision",
+            "shap_value": 0.012733
+        },
+        {
+            "feature": "Junction Control",
+            "shap_value": 0.011719
+        },
+        {
+            "feature": "Ped Crossing PC",
+            "shap_value": 0.010329
+        },
+        {
+            "feature": "Month of Collision",
+            "shap_value": 0.007229
+        }
+    ],
+    "recommendations": [
+        "Increase driver caution and reduce speed during adverse weather conditions.",
+        "Strengthen speed-limit enforcement and speed monitoring in the affected area.",
+        "Improve road lighting and visibility during low-light conditions.",
+        "Inspect and maintain the road surface to improve driving safety.",
+        "Increase traffic enforcement and monitoring in the identified policing area."
+    ]
+}

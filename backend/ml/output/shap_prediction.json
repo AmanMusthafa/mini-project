@@ -1,0 +1,51 @@
+{
+    "row_index": 100,
+    "predicted_severity": "Minor",
+    "probabilities": {
+        "Fatal": 0.012,
+        "Major": 0.144,
+        "Minor": 0.844
+    },
+    "top_features": [
+        {
+            "feature": "time",
+            "shap_importance": 0.12182744869107301
+        },
+        {
+            "feature": "cause",
+            "shap_importance": 0.07305043317426745
+        },
+        {
+            "feature": "traffic_signal",
+            "shap_importance": 0.0513946748646186
+        },
+        {
+            "feature": "weather_condition",
+            "shap_importance": 0.0453745081666018
+        },
+        {
+            "feature": "road_surface",
+            "shap_importance": 0.04161186694214294
+        },
+        {
+            "feature": "road_name",
+            "shap_importance": 0.04159293788007235
+        },
+        {
+            "feature": "temperature_c",
+            "shap_importance": 0.038856314195270476
+        },
+        {
+            "feature": "junction_type",
+            "shap_importance": 0.03313335800463786
+        },
+        {
+            "feature": "lighting",
+            "shap_importance": 0.03277948614516614
+        },
+        {
+            "feature": "congestion_level",
+            "shap_importance": 0.02745639739470627
+        }
+    ]
+}
