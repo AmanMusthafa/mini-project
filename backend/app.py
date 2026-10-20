@@ -248,7 +248,8 @@ def login():
     password = data.get("password", "")
 
     if not username or not password:
-        return jsonify({"success": False, "error": "Username and password are required."}), 400
+        err = "Username and password are required."
+        return jsonify({"success": False, "error": err, "message": err}), 400
 
     conn = get_db()
     user = verify_credentials(conn, username, password)
@@ -256,7 +257,8 @@ def login():
 
     if not user:
         # Generic error message to prevent user enumeration
-        return jsonify({"success": False, "error": "Invalid username or password."}), 401
+        err = "Invalid username or password."
+        return jsonify({"success": False, "error": err, "message": err}), 401
 
     # Initialize server-side session
     session.clear()
@@ -268,6 +270,11 @@ def login():
     return jsonify({
         "success": True,
         "user": user,
+        "username": user['username'],
+        "name": user['name'],
+        "role": user['role'],
+        "email": user.get('email', ''),
+        "department": user.get('department', ''),
         "message": f"Welcome back, {user['name']}!"
     })
 

@@ -150,14 +150,14 @@ def init_users(conn):
     c = conn.cursor()
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Initial Admin from Config
-    admin_pass = Config.ADMIN_PASSWORD
+    # Seed users with documented credentials (and support Config.ADMIN_PASSWORD if provided)
+    admin_pass = os.getenv('ADMIN_PASSWORD', 'Admin@123')
     admin_hash = generate_password_hash(admin_pass)
 
     users_data = [
         ("admin", admin_hash, "System Administrator", "admin@roadsafety.kochi.gov.in", "Traffic Safety Control Unit", "+91-484-2387100", "admin", now_str),
-        ("analyst", generate_password_hash("AnalystPass2026!"), "Traffic Analyst", "analyst@roadsafety.kochi.gov.in", "Data & Research Cell", "+91-484-2387102", "analyst", now_str),
-        ("viewer", generate_password_hash("ViewerPass2026!"), "Public Observer", "viewer@roadsafety.kochi.gov.in", "Citizen Safety Cell", "+91-484-2387105", "viewer", now_str)
+        ("analyst", generate_password_hash("Analyst@123"), "Traffic Analyst", "analyst@roadsafety.kochi.gov.in", "Data & Research Cell", "+91-484-2387102", "analyst", now_str),
+        ("viewer", generate_password_hash("Viewer@123"), "Public Observer", "viewer@roadsafety.kochi.gov.in", "Citizen Safety Cell", "+91-484-2387105", "viewer", now_str)
     ]
 
     c.executemany(

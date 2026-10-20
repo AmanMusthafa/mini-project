@@ -108,7 +108,14 @@ loginForm.addEventListener('submit', async function(e){
     btnText.textContent   = 'Login to Dashboard';
 
     if(result.success){
-      currentUser = {username:result.username, name:result.name||'Admin', role:result.role||'Admin', email:result.email||'', department:result.department||''};
+      const u = result.user || result;
+      currentUser = {
+        username: u.username || 'admin',
+        name: u.name || 'Admin',
+        role: u.role || 'Admin',
+        email: u.email || '',
+        department: u.department || ''
+      };
       sessionStorage.setItem('kochi_session_user', JSON.stringify(currentUser));
       sessionStorage.setItem('kochi_active_page', 'dashboard');
       document.documentElement.classList.add('logged-in-session');
@@ -122,7 +129,7 @@ loginForm.addEventListener('submit', async function(e){
         navigateTo('dashboard');
       }, 400);
     } else {
-      showToast('error', 'Login Failed', result.message);
+      showToast('error', 'Login Failed', result.error || result.message || 'Invalid username or password.');
     }
   } catch(err){
     spinner.style.display = 'none';

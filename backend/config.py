@@ -31,7 +31,7 @@ class Config:
 
     # Admin credentials for initial setup
     ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
-    ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'AdminSecurePass2026!')
+    ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'Admin@123')
 
     # File uploads
     MAX_UPLOAD_MB = int(os.getenv('MAX_UPLOAD_MB', 50))
