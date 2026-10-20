@@ -207,12 +207,15 @@ function navigateTo(pageId){
   document.getElementById('topbar-title-text').textContent = meta.title;
   document.getElementById('topbar-title-sub').innerHTML   = meta.sub;
   document.getElementById('sidebar').classList.remove('mobile-open');
+  const overlay = document.getElementById('sidebar-overlay');
+  if(overlay) overlay.classList.remove('active');
   requestAnimationFrame(()=>{
     initPageContent(pageId);
     if(pageId === 'hotspot' && typeof hotspotMapInstance !== 'undefined' && hotspotMapInstance){
       setTimeout(() => hotspotMapInstance.invalidateSize(), 200);
     }
   });
+}
 
 document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
   item.addEventListener('click', ()=>navigateTo(item.dataset.page));
