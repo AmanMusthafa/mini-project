@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: ai-road-safety-system
+    env: python
+    buildCommand: "pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu && pip install -r requirements.txt && python backend/scripts/build_database.py && python backend/ml/train.py"
+    startCommand: "gunicorn backend.app:app --workers 1 --threads 4 --timeout 300"
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_PATH
+        value: backend/database.db
+      - key: MAX_UPLOAD_MB
+        value: 50
+      - key: YOLO_WEIGHTS
+        value: backend/models/yolov8s.pt

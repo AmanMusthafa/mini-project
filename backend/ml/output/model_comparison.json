@@ -1,0 +1,22 @@
+{
+  "LogisticRegression": {
+    "accuracy": 0.4565,
+    "balanced_accuracy": 0.4487,
+    "macro_f1": 0.4499
+  },
+  "RandomForest": {
+    "accuracy": 0.4571,
+    "balanced_accuracy": 0.4438,
+    "macro_f1": 0.4419
+  },
+  "XGBoost": {
+    "accuracy": 0.4503,
+    "balanced_accuracy": 0.4427,
+    "macro_f1": 0.4437
+  },
+  "MajorityBaseline": {
+    "accuracy": 0.3711,
+    "balanced_accuracy": 0.3333,
+    "macro_f1": 0.1804
+  }
+}

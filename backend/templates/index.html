@@ -235,11 +235,11 @@
               </div>
               <div class="pd-row">
                 <span class="pd-label">Department</span>
-                <span class="pd-value">Thrissur City Traffic Police</span>
+                <span class="pd-value">Kochi City Traffic Safety Unit</span>
               </div>
               <div class="pd-row">
                 <span class="pd-label">Email</span>
-                <span class="pd-value">arjun.devadas@thrissurpolice.gov.in</span>
+                <span class="pd-value">admin@roadsafety.kochi.gov.in</span>
               </div>
               <div class="pd-row">
                 <span class="pd-label">Access Level</span>
@@ -519,19 +519,19 @@
                 <option value="minor">Minor</option>
               </select>
             </div>
-            <div class="form-group" style="margin:0;"><label>State</label>
-              <select class="form-control" id="filter-state">
-                <option value="">All States</option>
-                <option>Maharashtra</option>
-                <option>Punjab</option>
-                <option>Tamil Nadu</option>
-                <option>West Bengal</option>
-                <option>Karnataka</option>
-                <option>Delhi</option>
-                <option>Telangana</option>
+            <div class="form-group" style="margin:0;"><label>Area</label>
+              <select class="form-control" id="filter-area">
+                <option value="">All Kochi Areas</option>
+                <option value="Edappally">Edappally</option>
+                <option value="Fort Kochi">Fort Kochi</option>
+                <option value="Kadavanthra">Kadavanthra</option>
+                <option value="Kakkanad">Kakkanad</option>
+                <option value="Mattancherry">Mattancherry</option>
+                <option value="Palarivattom">Palarivattom</option>
+                <option value="Vyttila">Vyttila</option>
               </select>
             </div>
-            <button class="btn btn-primary ripple-surface" id="analytics-filter-btn" onclick="applyAnalyticsFilter()">
+            <button class="btn btn-primary ripple-surface" id="analytics-filter-btn">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                 stroke-linejoin="round">
                 <path d="M22 3H2l8 9.5V19l4 2v-8.5z" />
@@ -566,7 +566,7 @@
             <div class="card-head-text">
               <h3>Recent Accident Records</h3>
               <div class="card-sub">Latest logged incidents across the network</div>
-            </div><span class="badge b-neutral">312 total records</span>
+            </div><span class="badge b-neutral" id="recent-records-badge">Recent Incidents</span>
           </div>
           <div class="table-wrap">
             <table>
@@ -778,17 +778,16 @@
             <div class="gauge-wrap">
               <svg viewBox="0 0 100 100">
                 <circle class="gauge-track" cx="50" cy="50" r="45" />
-                <circle class="gauge-fill" id="risk-gauge-fill" cx="50" cy="50" r="45" stroke="#F04438"
-                  stroke-dashoffset="63" />
+                <circle class="gauge-fill" id="risk-gauge-fill" cx="50" cy="50" r="45" stroke="#94A3B8"
+                  stroke-dashoffset="283" />
               </svg>
               <div class="gauge-center">
-                <div class="gpct" id="risk-gauge-pct">78%</div>
-                <div class="glabel b-red badge" id="risk-gauge-label">High Risk</div>
+                <div class="gpct" id="risk-gauge-pct" style="color:var(--text-muted, #64748B);">—</div>
+                <div class="glabel badge" id="risk-gauge-label" style="background:rgba(100,116,139,0.15);color:#64748B;">Awaiting Input</div>
               </div>
             </div>
             <p class="text-dim" style="font-size:12px; text-align:center; margin-top:16px; line-height:1.6;"
-              id="risk-gauge-desc">Accident probability is high for the selected parameters. Preventive action
-              recommended.</p>
+              id="risk-gauge-desc">Select scenario parameters on the left and click 'Predict Severity' to evaluate model inference.</p>
           </div>
 
           <div class="card col-span-5 card-pad hoverable animate-slideUp delay-3">
@@ -799,19 +798,18 @@
             </div>
             <div class="flex justify-between items-center"
               style="padding:11px 0; border-bottom:1px solid var(--border);"><span class="text-dim"
-                style="font-size:12.5px; font-weight:600;">Model Used</span><span class="badge b-blue">XGBoost
+                style="font-size:12.5px; font-weight:600;">Model Used</span><span class="badge b-blue">Calibrated XGBoost
                 Classifier</span></div>
             <div class="flex justify-between items-center"
               style="padding:11px 0; border-bottom:1px solid var(--border);"><span class="text-dim"
                 style="font-size:12.5px; font-weight:600;">Prediction Time</span><span
-                style="font-size:12.5px; font-weight:700;" id="risk-pred-time">24-05-2026, 05:29 PM</span></div>
+                style="font-size:12.5px; font-weight:700;" id="risk-pred-time">—</span></div>
             <div class="flex justify-between items-center"
               style="padding:11px 0; border-bottom:1px solid var(--border);"><span class="text-dim"
                 style="font-size:12.5px; font-weight:600;">Model Confidence</span><span
-                style="font-size:12.5px; font-weight:700;" id="risk-confidence">78%</span></div>
+                style="font-size:12.5px; font-weight:700;" id="risk-confidence">—</span></div>
             <div class="flex justify-between items-center" style="padding:11px 0;"><span class="text-dim"
-                style="font-size:12.5px; font-weight:600;">Last Updated</span><span class="badge b-green">Just
-                Now</span></div>
+                style="font-size:12.5px; font-weight:600;">Status</span><span class="badge b-blue" id="risk-status-badge">Ready for Input</span></div>
             <hr class="sep">
             <div class="card-head-text" style="margin-bottom:10px;">
               <h3>Top Contributing Factors</h3>
@@ -1003,7 +1001,7 @@
             <h1>Traffic Management</h1>
             <p>Real-time traffic monitoring and adaptive signal optimization</p>
           </div>
-          <span class="badge b-green"><span class="dot-status live"></span>Signal System Active</span>
+          <span class="badge b-orange"><span class="dot-status warning"></span>Simulation Mode (Webster Optimizer)</span>
         </div>
 
         <div class="grid grid-12 mb-16" style="align-items:stretch;">
@@ -1011,7 +1009,7 @@
             <div class="card-head">
               <div class="card-head-text">
                 <h3>Live Traffic Feed — YOLOv8 Detection</h3>
-                <div class="card-sub">Punkunnam Junction · CAM-03</div>
+                <div class="card-sub">Vyttila Mobility Hub · CAM-01 (Kochi)</div>
               </div>
             </div>
             <div class="detect-stage" id="traffic-detect-stage" style="height:300px;">
@@ -1431,8 +1429,8 @@
           <div class="card col-span-5 card-pad hoverable animate-slideUp delay-2">
             <div class="card-head">
               <div class="card-head-text">
-                <h3>Live Emergency Feed</h3>
-                <div class="card-sub">Ambulance KL-01-AB-1234 · Punkunnam Jn.</div>
+                <h3>Emergency Approach Feed</h3>
+                <div class="card-sub">Emergency Preemption Simulator · 4-Way Approach (Kochi)</div>
               </div>
             </div>
             <div class="detect-stage" id="emergency-detect-stage" style="height:230px;">

@@ -5,18 +5,16 @@
    All real analytics come from the SQLite API
    ================================================================ */
 const LOCATIONS = [
-  {name:'Punkunnam Junction', lat:10.5276, lng:76.2044, tier:'veryhigh', accidents:41, risk:92},
-  {name:'Chembukavu Junction', lat:10.5350, lng:76.2100, tier:'high',     accidents:34, risk:81},
-  {name:'Kuttanellur Road',    lat:10.5450, lng:76.2300, tier:'high',     accidents:29, risk:77},
-  {name:'MG Road',             lat:10.5296, lng:76.2141, tier:'moderate', accidents:22, risk:62},
-  {name:'West Fort',           lat:10.5180, lng:76.2115, tier:'moderate', accidents:19, risk:58},
-  {name:'Puthur Road',         lat:10.5100, lng:76.2200, tier:'moderate', accidents:17, risk:55},
-  {name:'Vyyur Junction',      lat:10.5430, lng:76.2130, tier:'moderate', accidents:16, risk:54},
-  {name:'Round South',         lat:10.5260, lng:76.2130, tier:'low',      accidents:11, risk:38},
-  {name:'East Fort',           lat:10.5230, lng:76.2170, tier:'low',      accidents:9,  risk:34},
-  {name:'Ollur Junction',      lat:10.4950, lng:76.2250, tier:'low',      accidents:8,  risk:30},
-  {name:'Ayyanthole',          lat:10.5350, lng:76.1980, tier:'veryhigh', accidents:37, risk:88},
-  {name:'Poothole',            lat:10.5215, lng:76.2085, tier:'low',      accidents:7,  risk:27}
+  {name:'Edappally Toll Junction', lat:10.0261, lng:76.3083, tier:'veryhigh', accidents:41, risk:92},
+  {name:'Vyttila Mobility Hub',    lat:9.9671,  lng:76.3217, tier:'veryhigh', accidents:37, risk:88},
+  {name:'Palarivattom Junction',   lat:10.0024, lng:76.3118, tier:'high',     accidents:34, risk:81},
+  {name:'Kadavanthra Junction',    lat:9.9710,  lng:76.2951, tier:'high',     accidents:29, risk:77},
+  {name:'Infopark Expressway',     lat:10.0159, lng:76.3419, tier:'moderate', accidents:22, risk:62},
+  {name:'MG Road Kadavanthra',     lat:9.9685,  lng:76.2850, tier:'moderate', accidents:19, risk:58},
+  {name:'Beach Road Fort Kochi',   lat:9.9638,  lng:76.2424, tier:'moderate', accidents:17, risk:55},
+  {name:'Jew Town Road',           lat:9.9563,  lng:76.2603, tier:'low',      accidents:11, risk:38},
+  {name:'NH 66 Bypass',            lat:10.0300, lng:76.3150, tier:'veryhigh', accidents:48, risk:95},
+  {name:'Seaport Airport Road',    lat:10.0250, lng:76.3350, tier:'high',     accidents:31, risk:79}
 ];
 
 /* Geographic centres of Kochi areas — lat / lng */
@@ -622,10 +620,10 @@ function renderDashRecentAccidents(records){
 
 function renderDashEmergencyAlerts(){
   const alerts = [
-    {text:'Ambulance dispatched to Punkunnam Jn.', time:'2 min ago',  color:'red'},
-    {text:'Signal preempted at Kuttanellur Road',  time:'8 min ago',  color:'blue'},
-    {text:'Green corridor activated — MG Road',    time:'15 min ago', color:'green'},
-    {text:'High risk alert — Ayyanthole junction', time:'22 min ago', color:'orange'}
+    {text:'Ambulance dispatched to Edappally Toll Jn.', time:'2 min ago',  color:'red'},
+    {text:'Signal preempted at Palarivattom Bypass',   time:'8 min ago',  color:'blue'},
+    {text:'Green corridor activated — MG Road Kadavanthra', time:'15 min ago', color:'green'},
+    {text:'High risk alert — Vyttila Mobility Hub',     time:'22 min ago', color:'orange'}
   ];
   const el = document.getElementById('dash-emergency-alerts');
   if(!el) return;
@@ -643,10 +641,10 @@ function renderDashEmergencyAlerts(){
 
 function renderDashTrafficStatus(){
   const rows = [
-    {name:'Punkunnam Junction', density:'High',     color:'red'},
-    {name:'MG Road',            density:'Moderate', color:'orange'},
-    {name:'West Fort',          density:'Low',      color:'green'},
-    {name:'Kuttanellur Road',   density:'High',     color:'red'}
+    {name:'Edappally Toll Junction', density:'High',     color:'red'},
+    {name:'MG Road Kadavanthra',     density:'Moderate', color:'orange'},
+    {name:'Marine Drive / Menaka',    density:'Low',      color:'green'},
+    {name:'Vyttila Mobility Hub',    density:'High',     color:'red'}
   ];
   const el = document.getElementById('dash-traffic-status');
   if(!el) return;
@@ -1794,18 +1792,69 @@ function initTrafficCharts(){
   mkChart('chart-signal-timing',{type:'doughnut',data:{labels:['Phase 1 (N-S)','Phase 2 (E-W)','Phase 3 (NS-Left)','Phase 4 (EW-Left)'],datasets:[{data:[25,30,20,15],backgroundColor:['#17B26A','#F04438','#F79009','#2D7CFF'],borderWidth:3,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{display:true,position:'bottom',labels:{boxWidth:8,boxHeight:8,usePointStyle:true,pointStyle:'circle',padding:8,font:{size:10}}}}}});
   mkChart('chart-congestion',{type:'bar',data:{labels:['Mon','Tue','Wed','Thu','Fri','Sat'],datasets:[{label:'Before',data:[68,72,65,70,75,60],backgroundColor:'#EEF1F7',borderRadius:5,maxBarThickness:14},{label:'After',data:[38,42,35,40,45,32],backgroundColor:'#2D7CFF',borderRadius:5,maxBarThickness:14}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{grid:gridOpt(),border:{display:false}},x:{grid:{display:false},border:{display:false}}},plugins:{legend:{display:true,position:'bottom',labels:{boxWidth:8,boxHeight:8,usePointStyle:true,pointStyle:'circle',font:{size:10.5,weight:'600'}}}}}});
   const evEl=document.getElementById('traffic-ev-table');
-  if(evEl) evEl.innerHTML=[{id:'EV-102',type:'Ambulance',loc:'West Fort Road',eta:'2 mins'},{id:'EV-103',type:'Fire Truck',loc:'MG Road',eta:'4 mins'},{id:'EV-104',type:'Ambulance',loc:'Punkunnam',eta:'3 mins'},{id:'EV-105',type:'Police Escort',loc:'Chembukavu',eta:'6 mins'}].map(r=>`<tr><td class="mono">${r.id}</td><td>${r.type}</td><td>${r.loc}</td><td>${r.eta}</td><td><span class="badge b-green"><span class="dot-status live"></span>Active</span></td></tr>`).join('');
+  if(evEl) evEl.innerHTML=[
+    {id:'EV-102',type:'Ambulance',loc:'Edappally Toll Jn.',eta:'2 mins'},
+    {id:'EV-103',type:'Fire Truck',loc:'MG Road Kadavanthra',eta:'4 mins'},
+    {id:'EV-104',type:'Ambulance',loc:'Palarivattom Bypass',eta:'3 mins'},
+    {id:'EV-105',type:'Police Escort',loc:'Vyttila Mobility Hub',eta:'6 mins'}
+  ].map(r=>`<tr><td class="mono">${r.id}</td><td>${r.type}</td><td>${r.loc}</td><td>${r.eta}</td><td><span class="badge b-green"><span class="dot-status live"></span>Active</span></td></tr>`).join('');
   buildRoadSceneInto('traffic-detect-stage',trafficVehicles(),true);
 }
 
 /* ================================================================
    EMERGENCY PRIORITY
    ================================================================ */
-function initEmergencyPage(){
+async function initEmergencyPage(){
   const emEl=document.getElementById('emergency-table');
-  if(emEl) emEl.innerHTML=[{v:'KL-01-AB-1234',type:'Ambulance',loc:'Punkunnam Junction',eta:'1 min'},{v:'KL-07-CD-5678',type:'Fire Truck',loc:'Kuttanellur Road',eta:'2 min'},{v:'KL-11-EF-9012',type:'Ambulance',loc:'Chembukavu',eta:'3 min'},{v:'KL-04-GH-3345',type:'Police',loc:'MG Road',eta:'5 min'}].map(r=>`<tr><td class="mono">${r.v}</td><td>${r.type}</td><td>${r.loc}</td><td>${r.eta}</td><td><span class="badge b-green"><span class="dot-status live"></span>Active</span></td></tr>`).join('');
   const tlEl=document.getElementById('emergency-timeline');
-  if(tlEl) tlEl.innerHTML=[{time:'05:28 PM',text:'Signal preempted at Punkunnam Junction for Ambulance KL-01-AB-1234',color:'red'},{time:'05:22 PM',text:'Signal preempted at Kuttanellur Road for Fire Truck KL-07-CD-5678',color:'orange'},{time:'05:15 PM',text:'Green corridor created for Ambulance KL-11-EF-9012',color:'green'},{time:'05:04 PM',text:'Traffic diverted at MG Road for Police escort',color:'blue'}].map(i=>`<div class="tl-item"><div class="tl-dot" style="background:${hexAlpha(colorHex(i.color),0.16)};color:${colorHex(i.color)};"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/></svg></div><div><div class="tl-time">${i.time}</div><div class="tl-text">${i.text}</div></div></div>`).join('');
+
+  try {
+    const res = await apiFetch('/api/emergency/events');
+    if (res && res.success && res.events && res.events.length > 0) {
+      if(emEl) {
+        emEl.innerHTML = res.events.map(ev => `
+          <tr>
+            <td class="mono">EV-${ev.id || '901'}</td>
+            <td>${ev.vehicle_type || 'Ambulance'}</td>
+            <td>${ev.approach ? ev.approach + ' Approach' : 'Edappally Toll'}</td>
+            <td>${ev.eta_seconds ? Math.round(ev.eta_seconds / 60) + ' min' : '2 min'}</td>
+            <td><span class="badge b-green"><span class="dot-status live"></span>${ev.decision || 'Preempted'}</span></td>
+          </tr>
+        `).join('');
+      }
+      if(tlEl) {
+        tlEl.innerHTML = res.events.slice(0, 5).map(ev => `
+          <div class="tl-item">
+            <div class="tl-dot" style="background:rgba(23,178,106,0.16);color:#17B26A;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/></svg>
+            </div>
+            <div>
+              <div class="tl-time">${ev.timestamp ? ev.timestamp.slice(11, 16) : 'Just Now'}</div>
+              <div class="tl-text">Signal preempted for ${ev.vehicle_type} on ${ev.approach} Approach (${ev.decision})</div>
+            </div>
+          </div>
+        `).join('');
+      }
+      buildRoadSceneInto('emergency-detect-stage',emergencyVehicles(),true);
+      return;
+    }
+  } catch (e) {
+    console.warn('Could not fetch emergency events, using live defaults', e);
+  }
+
+  if(emEl) emEl.innerHTML=[
+    {v:'KL-07-AB-1234',type:'Ambulance',loc:'Edappally Toll Junction',eta:'1 min'},
+    {v:'KL-07-CD-5678',type:'Fire Truck',loc:'Palarivattom Bypass',eta:'2 min'},
+    {v:'KL-07-EF-9012',type:'Ambulance',loc:'Vyttila Mobility Hub',eta:'3 min'},
+    {v:'KL-07-GH-3345',type:'Police',loc:'MG Road Kadavanthra',eta:'5 min'}
+  ].map(r=>`<tr><td class="mono">${r.v}</td><td>${r.type}</td><td>${r.loc}</td><td>${r.eta}</td><td><span class="badge b-green"><span class="dot-status live"></span>Active</span></td></tr>`).join('');
+  
+  if(tlEl) tlEl.innerHTML=[
+    {time:'05:28 PM',text:'Signal preempted at Edappally Toll Junction for Ambulance KL-07-AB-1234',color:'red'},
+    {time:'05:22 PM',text:'Signal preempted at Palarivattom Bypass for Fire Truck KL-07-CD-5678',color:'orange'},
+    {time:'05:15 PM',text:'Green corridor created for Ambulance KL-07-EF-9012 at Vyttila',color:'green'},
+    {time:'05:04 PM',text:'Traffic diverted at MG Road Kadavanthra for Police escort',color:'blue'}
+  ].map(i=>`<div class="tl-item"><div class="tl-dot" style="background:${hexAlpha(colorHex(i.color),0.16)};color:${colorHex(i.color)};"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/></svg></div><div><div class="tl-time">${i.time}</div><div class="tl-text">${i.text}</div></div></div>`).join('');
   buildRoadSceneInto('emergency-detect-stage',emergencyVehicles(),true);
 }
 
@@ -1987,7 +2036,7 @@ async function runYoloDetection(){
         const totDisp = document.getElementById('yolo-total-display');
         if(sepEl)   sepEl.style.display  = '';
         if(totRow)  totRow.style.removeProperty('display');
-        if(totDisp) totDisp.textContent  = total + ' vehicles';
+        if(totDisp) totDisp.textContent  = (!data.is_image && data.line_crossed_total > 0) ? `${total} vehicles crossed tripwire` : `${total} vehicles`;
       } else {
         summaryEl.innerHTML = '<div class="text-dim" style="font-size:12px;text-align:center;padding:20px 0;">No vehicles detected — try lowering confidence threshold.</div>';
       }
@@ -2020,8 +2069,10 @@ async function runYoloDetection(){
       }
     }
 
-    showToast('success', 'Detection complete',
-      `${total} vehicles · Density: ${data.density} · Conf: ${data.conf_used}`);
+    const toastMsg = (!data.is_image && data.line_crossed_total > 0) 
+      ? `${total} vehicles crossed line · Peak in frame: ${data.peak_vehicles} · Density: ${data.density}`
+      : `${total} vehicles · Density: ${data.density} · Conf: ${data.conf_used}`;
+    showToast('success', 'Detection complete', toastMsg);
 
   } catch(err){
     console.error('[YOLO]', err);

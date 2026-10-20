@@ -1,1965 +1,1379 @@
-# Import Flask libraries
-from flask import Flask, request, jsonify, render_template, send_from_directory
-from flask_cors import CORS
-
-# Import database and file libraries
-import sqlite3
+"""
+AI Road Safety & Intelligent Traffic Monitoring System - Core Backend Application
+Integrated Flask Application supporting:
+- Parameterized SQLite queries & strict input validation (Zero SQL injection)
+- Session-based authentication with password hashing & role enforcement
+- Calibrated XGBoost accident severity prediction with SHAP local explainability
+- Decision-support recommendations derived from feature attributions
+- Webster's Method traffic signal optimization
+- Emergency vehicle preemption planning & event logging
+- Async streaming YOLOv8 vehicle detection & line-crossing throughput counting
+- Live PDF & CSV report generation
+"""
 import os
+import io
+import sys
 import json
+import uuid
+import time
+import logging
+import sqlite3
+import datetime
+from pathlib import Path
+from collections import Counter
 
-# Import for YOLOv8 video detection
-import base64
-import tempfile
-
-# Import pandas and numpy for ML input data
+from flask import (
+    Flask, request, jsonify, render_template,
+    send_from_directory, send_file, session
+)
+from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.utils import secure_filename
 import pandas as pd
 import numpy as np
-
-# Import library for loading the trained ML model
 import joblib
-
-# Import SHAP for model explanations
 import shap
+import cv2
 
-# ===========================
-# Paths
-# ===========================
+# Ensure project root in python path
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR))
 
-# Get the backend folder path
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+from backend.config import Config
+from backend.auth_service import login_required, role_required, verify_credentials
+from backend.recommendations import generate_shap_recommendations
+from backend.signal_optimizer import optimize_traffic_signals
+from backend.emergency_priority import compute_emergency_preemption, log_emergency_event
+from backend.report_generator import generate_pdf_report, stream_csv_export
+from backend.yolo_service import (
+    process_detection_job, read_job_meta, cleanup_old_jobs
+)
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger = logging.getLogger("RoadSafetyApp")
 
-# ===========================
-# Flask Application
-# ===========================
-
-# Create the Flask application
+# Initialize Flask
 app = Flask(
     __name__,
-    template_folder=os.path.join(BASE_DIR, "templates"),
-    static_folder=os.path.join(BASE_DIR, "static")
+    template_folder=str(Path(Config.BASE_DIR) / "backend" / "templates"),
+    static_folder=str(Path(Config.BASE_DIR) / "backend" / "static")
+)
+app.config['SECRET_KEY'] = Config.SECRET_KEY
+app.config['MAX_CONTENT_LENGTH'] = Config.MAX_CONTENT_LENGTH
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+if Config.FLASK_ENV == 'production':
+    app.config['SESSION_COOKIE_SECURE'] = True
+
+# CORS restricted to allowed origins
+CORS(app, origins=Config.ALLOWED_ORIGINS, supports_credentials=True)
+
+# Rate limiter for security
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=[],
+    storage_uri="memory://"
 )
 
-# Enable frontend requests
-CORS(app)
-
-
-# ===========================
-# Dedicated Kerala ML Model (Trained on 91,686 Kerala records)
-# ===========================
-
-KERALA_MODEL_PATH = os.path.join(
-    BASE_DIR,
-    "ml",
-    "models",
-    "kerala_accident_severity_xgboost.pkl"
-)
-
-KERALA_PREPROCESSOR_PATH = os.path.join(
-    BASE_DIR,
-    "ml",
-    "models",
-    "kerala_accident_severity_preprocessor.pkl"
-)
-
-KERALA_LABEL_MAPPING_PATH = os.path.join(
-    BASE_DIR,
-    "ml",
-    "models",
-    "kerala_accident_severity_label_mapping.pkl"
-)
-
-# Load the trained Kerala XGBoost model
-kerala_ml_model = joblib.load(KERALA_MODEL_PATH)
-
-# Load the Kerala preprocessing pipeline
-kerala_ml_preprocessor = joblib.load(KERALA_PREPROCESSOR_PATH)
-
-# Load the severity label mapping
-kerala_ml_mapping = joblib.load(KERALA_LABEL_MAPPING_PATH)
-
-# Create SHAP explainer for the trained XGBoost model
-kerala_shap_explainer = shap.TreeExplainer(kerala_ml_model)
-
-print("Dedicated Kerala XGBoost model loaded successfully (91,686 records)!")
-print("Kerala preprocessing pipeline & SHAP explainer initialized!")
-
-
-# ===========================
-# Database
-# ===========================
-
-# Create a database connection
+# Database Connection Helper
 def get_db():
-    # Open the SQLite database
-    conn = sqlite3.connect(
-        os.path.join(BASE_DIR, "database.db")
-    )
-
-    # Return rows as dictionary-like objects
+    conn = sqlite3.connect(Config.DATABASE_PATH)
     conn.row_factory = sqlite3.Row
-
     return conn
 
-
-# ===========================
-# Dashboard Filters
-# ===========================
-
-# Build optional dashboard filters
-def build_filter(year='', severity='', state=''):
-    """Return WHERE clause and parameters."""
-
-    # Store conditions and values
-    conds = []
-    params = []
-
-    # Filter by year
-    if year:
-        conds.append("substr(date,7,4)=?")
-        params.append(str(year))
-
-    # Filter by severity
-    if severity:
-        conds.append("LOWER(accident_severity)=?")
-        params.append(severity.lower())
-
-    # Filter by state
-    if state:
-        conds.append("state=?")
-        params.append(state)
-
-    # Create the WHERE clause
-    where = (
-        'WHERE ' + ' AND '.join(conds)
-        if conds
-        else ''
+# Security Headers
+@app.after_request
+def add_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self' 'unsafe-inline' https:; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "img-src 'self' data: blob: https:; "
+        "connect-src 'self' https:;"
     )
+    return response
 
-    return where, params
+# Global Error Handlers
+@app.errorhandler(400)
+def bad_request(e):
+    return jsonify({"success": False, "error": str(e.description if hasattr(e, 'description') else "Bad request")}), 400
 
+@app.errorhandler(401)
+def unauthorized(e):
+    return jsonify({"success": False, "error": "Authentication required. Please log in."}), 401
+
+@app.errorhandler(403)
+def forbidden(e):
+    return jsonify({"success": False, "error": "Permission denied. Insufficient role privileges."}), 403
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"success": False, "error": "Requested resource not found."}), 404
+
+@app.errorhandler(413)
+def request_entity_too_large(e):
+    return jsonify({"success": False, "error": f"Uploaded file exceeds maximum limit ({Config.MAX_UPLOAD_MB}MB)."}), 413
+
+@app.errorhandler(500)
+def server_error(e):
+    logger.error(f"Internal server error: {e}", exc_info=True)
+    return jsonify({"success": False, "error": "An internal server error occurred. Please contact system administrator."}), 500
 
 # ===========================
-# Hero-section Images
+# Model & Explainer Loading
 # ===========================
+ml_artifacts = {
+    "model": None,
+    "preprocessor": None,
+    "label_mapping": None,
+    "metadata": None,
+    "model_card": None,
+    "explainer": None,
+    "loaded": False,
+    "error": None
+}
 
-# Set the hero image directory
-HERO_IMG_DIR = os.path.join(
-    BASE_DIR,
-    "..",
-    "public",
-    "images",
-    "herosection"
-)
+def load_ml_artifacts():
+    global ml_artifacts
+    models_dir = Path(Config.ML_MODELS_DIR)
+    
+    # Try kochi_ names first, then kerala_ legacy names
+    for prefix in ["kochi_accident_severity", "kerala_accident_severity"]:
+        model_p = models_dir / f"{prefix}_xgboost.pkl"
+        prep_p = models_dir / f"{prefix}_preprocessor.pkl"
+        map_p = models_dir / f"{prefix}_label_mapping.pkl"
+        meta_p = models_dir / f"{prefix.split('_')[0]}_features_metadata.json"
+        
+        if model_p.exists() and prep_p.exists() and map_p.exists():
+            try:
+                model = joblib.load(model_p)
+                prep = joblib.load(prep_p)
+                mapping = joblib.load(map_p)
+                meta = {}
+                if meta_p.exists():
+                    with open(meta_p, "r") as f:
+                        meta = json.load(f)
+                        
+                card = {}
+                card_p = models_dir / "model_card.json"
+                if card_p.exists():
+                    with open(card_p, "r") as f:
+                        card = json.load(f)
+                        
+                explainer = shap.TreeExplainer(model)
+                
+                ml_artifacts["model"] = model
+                ml_artifacts["preprocessor"] = prep
+                ml_artifacts["label_mapping"] = mapping
+                ml_artifacts["metadata"] = meta
+                ml_artifacts["model_card"] = card
+                ml_artifacts["explainer"] = explainer
+                ml_artifacts["loaded"] = True
+                ml_artifacts["error"] = None
+                logger.info(f"Loaded ML model & SHAP explainer from {model_p.name} successfully.")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to load ML artifacts: {e}", exc_info=True)
+                ml_artifacts["error"] = str(e)
+                return False
+                
+    err = "ML Model files missing in backend/ml/models/. Run 'python backend/ml/train.py --seed 42' to build models."
+    logger.warning(err)
+    ml_artifacts["error"] = err
+    ml_artifacts["loaded"] = False
+    return False
 
-
-# Serve hero-section images
-@app.route("/herosection/<path:filename>")
-def herosection_image(filename):
-
-    # Return the requested image
-    return send_from_directory(
-        os.path.abspath(HERO_IMG_DIR),
-        filename
-    )
-
+# Initialize ML artifacts
+load_ml_artifacts()
 
 # ===========================
-# Home
+# Base & Health Routes
 # ===========================
-
 @app.route("/")
 def home():
-
-    # Load the main dashboard page
     return render_template("index.html")
 
+@app.route("/herosection/<path:filename>")
+def herosection_image(filename):
+    hero_dir = Path(Config.BASE_DIR) / "public" / "images" / "herosection"
+    if not hero_dir.exists():
+        hero_dir = Path(Config.BASE_DIR) / "backend" / "static"
+    return send_from_directory(str(hero_dir), filename)
 
-# ===========================
-# Login
-# ===========================
+@app.route("/api/health")
+def health_check():
+    db_ok = False
+    db_rows = 0
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_rows = c.execute("SELECT COUNT(*) FROM accidents").fetchone()[0]
+        db_ok = True
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Database health check failed: {e}")
 
-@app.route("/login", methods=["POST"])
-def login():
+    yolo_model_path = Path(Config.YOLO_WEIGHTS)
+    yolo_available = yolo_model_path.exists() or Path(Config.BASE_DIR, "backend/models/yolov8s.pt").exists()
 
-    # Read login information
-    data = request.get_json()
-
-    # Get username and password
-    username = data.get("username")
-    password = data.get("password")
-
-    # Connect to database
-    conn = get_db()
-    c = conn.cursor()
-
-    # Check login credentials
-    c.execute(
-        """
-        SELECT *
-        FROM users
-        WHERE username=? AND password=?
-        """,
-        (username, password)
-    )
-
-    # Get the user
-    user = c.fetchone()
-
-    # Close database
-    conn.close()
-
-    # Return user information when login succeeds
-    if user:
-        return jsonify({
-            "success": True,
-            "message": "Login Successful",
-            "username": user["username"],
-            "name": user["name"],
-            "role": user["role"],
-            "email": user["email"],
-            "department": user["department"]
-        })
-
-    # Return error when login fails
+    status = "healthy" if (db_ok and ml_artifacts["loaded"]) else "degraded"
     return jsonify({
-        "success": False,
-        "message": "Invalid Username or Password"
+        "status": status,
+        "database": {"ok": db_ok, "records": db_rows},
+        "model_loaded": ml_artifacts["loaded"],
+        "model_error": ml_artifacts.get("error"),
+        "yolo_available": yolo_available,
+        "environment": Config.FLASK_ENV,
+        "data_provenance": "Synthetic Kochi research dataset (probabilistic multi-factor simulation)"
     })
 
-
 # ===========================
-# Profile GET
+# Authentication Routes
 # ===========================
+@app.route("/login", methods=["POST"])
+@limiter.limit("5 per minute")
+def login():
+    data = request.get_json(silent=True) or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
 
-@app.route("/api/profile")
-def get_profile():
+    if not username or not password:
+        return jsonify({"success": False, "error": "Username and password are required."}), 400
 
-    # Get username
-    username = request.args.get(
-        'username',
-        'admin'
-    )
-
-    # Connect to database
     conn = get_db()
-    c = conn.cursor()
-
-    # Get profile information
-    c.execute(
-        """
-        SELECT username, name, email,
-               department, phone, role
-        FROM users
-        WHERE username=?
-        """,
-        (username,)
-    )
-
-    # Get user
-    user = c.fetchone()
-
-    # Close database
+    user = verify_credentials(conn, username, password)
     conn.close()
 
-    # Return profile information
-    if user:
-        return jsonify({
-            'username': user['username'],
-            'name': user['name'] or '',
-            'email': user['email'] or '',
-            'department': user['department'] or '',
-            'phone': user['phone'] or '',
-            'role': user['role'] or ''
-        })
+    if not user:
+        # Generic error message to prevent user enumeration
+        return jsonify({"success": False, "error": "Invalid username or password."}), 401
 
-    # User not found
+    # Initialize server-side session
+    session.clear()
+    session['user_id'] = user['id']
+    session['username'] = user['username']
+    session['role'] = user['role']
+    session['name'] = user['name']
+
     return jsonify({
-        'error': 'Not found'
-    }), 404
+        "success": True,
+        "user": user,
+        "message": f"Welcome back, {user['name']}!"
+    })
 
+@app.route("/logout", methods=["POST", "GET"])
+def logout():
+    session.clear()
+    return jsonify({"success": True, "message": "Logged out successfully."})
 
-# ===========================
-# Profile UPDATE
-# ===========================
-
-@app.route("/api/profile/update", methods=["POST"])
-def update_profile():
-
-    # Read profile information
-    data = request.get_json()
-
-    # Get profile fields
-    username = data.get('username', 'admin')
-    name = data.get('name', '')
-    email = data.get('email', '')
-    department = data.get('department', '')
-    phone = data.get('phone', '')
-    role = data.get('role', '')
-
-    # Connect to database
+@app.route("/api/profile")
+@login_required
+def get_profile():
     conn = get_db()
     c = conn.cursor()
+    c.execute(
+        "SELECT id, username, name, email, department, phone, role FROM users WHERE id = ?",
+        (session['user_id'],)
+    )
+    user_row = c.fetchone()
+    conn.close()
 
-    # Update profile
+    if not user_row:
+        return jsonify({"success": False, "error": "User record not found."}), 404
+
+    return jsonify({
+        "success": True,
+        "user": dict(user_row)
+    })
+
+@app.route("/api/profile/update", methods=["POST"])
+@login_required
+def update_profile():
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    email = data.get("email", "").strip()
+    department = data.get("department", "").strip()
+    phone = data.get("phone", "").strip()
+
+    if not name or not email:
+        return jsonify({"success": False, "error": "Name and email are required fields."}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    # Note: User cannot change their own username or role (prevents privilege escalation)
     c.execute(
         """
         UPDATE users
-        SET name=?, email=?, department=?,
-            phone=?, role=?
-        WHERE username=?
+        SET name = ?, email = ?, department = ?, phone = ?
+        WHERE id = ?
         """,
-        (
-            name,
-            email,
-            department,
-            phone,
-            role,
-            username
-        )
+        (name, email, department, phone, session['user_id'])
     )
-
-    # Save changes
     conn.commit()
-
-    # Check whether update succeeded
-    ok = c.rowcount > 0
-
-    # Close database
     conn.close()
 
-    # Return update result
-    return jsonify({
-        'success': ok,
-        'message': (
-            'Profile updated successfully'
-            if ok
-            else 'Update failed'
-        )
-    })
+    session['name'] = name
+    return jsonify({"success": True, "message": "Profile updated successfully."})
 
+@app.route("/api/change-password", methods=["POST"])
+@login_required
+def change_password():
+    data = request.get_json(silent=True) or {}
+    current_pass = data.get("current_password", "")
+    new_pass = data.get("new_password", "")
 
-# ===========================
-# Dashboard — Summary Stats
-# ===========================
+    if len(new_pass) < 8:
+        return jsonify({"success": False, "error": "New password must be at least 8 characters long."}), 400
 
-@app.route("/api/dashboard/stats")
-def dashboard_stats():
-
-    # Read filters
-    year = request.args.get('year', '')
-    severity = request.args.get('severity', '')
-    state = request.args.get('state', '')
-
-    # Build filters
-    where, params = build_filter(
-        year,
-        severity,
-        state
-    )
-
-    # Connect to database
     conn = get_db()
     c = conn.cursor()
+    c.execute("SELECT password_hash FROM users WHERE id = ?", (session['user_id'],))
+    row = c.fetchone()
 
-    # Count total accidents
-    c.execute(
-        f"""
-        SELECT COUNT(*)
-        FROM road_accidents
-        {where}
-        """,
-        params
-    )
+    if not row or not check_password_hash(row['password_hash'], current_pass):
+        conn.close()
+        return jsonify({"success": False, "error": "Current password is incorrect."}), 400
 
-    total = c.fetchone()[0]
-
-    # Count individual severity classes
-    def count_sev(sev):
-
-        # Return zero when another severity is selected
-        if severity and severity.lower() != sev:
-            return 0
-
-        # Build severity conditions
-        conds2 = (
-            [f"substr(date,7,4)='{year}'"]
-            if year
-            else []
-        ) + (
-            [f"state='{state}'"]
-            if state
-            else []
-        )
-
-        # Add severity condition
-        conds2.append(
-            f"LOWER(accident_severity)='{sev}'"
-        )
-
-        # Build WHERE clause
-        w2 = (
-            'WHERE ' + ' AND '.join(conds2)
-            if conds2
-            else ''
-        )
-
-        # Count records
-        c.execute(
-            f"""
-            SELECT COUNT(*)
-            FROM road_accidents
-            {w2}
-            """
-        )
-
-        return c.fetchone()[0]
-
-    # Get severity counts
-    fatal = count_sev('fatal')
-    major = count_sev('major')
-    minor = count_sev('minor')
-
-    # Calculate casualties
-    c.execute(
-        f"""
-        SELECT SUM(
-            CAST(casualties AS INTEGER)
-        )
-        FROM road_accidents
-        {where}
-        """,
-        params
-    )
-
-    casualties = c.fetchone()[0] or 0
-
-    # Calculate average risk
-    c.execute(
-        f"""
-        SELECT AVG(
-            CAST(risk_score AS REAL)
-        )
-        FROM road_accidents
-        {where}
-        """,
-        params
-    )
-
-    avg_risk = c.fetchone()[0] or 0
-
-    # Close database
+    new_hash = generate_password_hash(new_pass)
+    c.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, session['user_id']))
+    conn.commit()
     conn.close()
 
-    # Return dashboard statistics
-    return jsonify({
-        "total": total,
-        "fatal": fatal,
-        "major": major,
-        "minor": minor,
-        "casualties": int(casualties),
-        "avg_risk": round(avg_risk * 100, 1)
-    })
-
+    return jsonify({"success": True, "message": "Password changed successfully."})
 
 # ===========================
-# Dashboard — Monthly Trend
+# Dashboard Filter Helper (Parameterized)
 # ===========================
-
-@app.route("/api/dashboard/trend")
-def dashboard_trend():
-
-    # Connect to database
-    conn = get_db()
-    c = conn.cursor()
-
-    # Get monthly accident counts
-    c.execute(
-        """
-        SELECT
-            substr(date,7,4) yr,
-            CAST(substr(date,4,2) AS INTEGER) mo,
-            COUNT(*) cnt
-        FROM road_accidents
-        WHERE date!=''
-        GROUP BY yr, mo
-        ORDER BY yr, mo
-        """
-    )
-
-    rows = c.fetchall()
-
-    # Close database
-    conn.close()
-
-    # Month names
-    months_short = [
-        'Jan', 'Feb', 'Mar', 'Apr',
-        'May', 'Jun', 'Jul', 'Aug',
-        'Sep', 'Oct', 'Nov', 'Dec'
-    ]
-
-    # Create chart data
-    data = {}
-
-    for row in rows:
-
-        # Get year
-        yr = row["yr"]
-
-        # Get month
-        mo = int(row["mo"])
-
-        # Check valid month
-        if 1 <= mo <= 12:
-
-            # Create chart label
-            label = f"{months_short[mo-1]} {yr}"
-
-            # Store count
-            data[label] = row["cnt"]
-
-    # Return chart data
-    return jsonify({
-        "labels": list(data.keys()),
-        "values": list(data.values())
-    })
-
-
-# ===========================
-# Dashboard — Year-by-Year Trend
-# ===========================
-
-@app.route("/api/dashboard/trend_by_year")
-def dashboard_trend_by_year():
-
-    # Connect to database
-    conn = get_db()
-    c = conn.cursor()
-
-    # Month names
-    months_short = [
-        'Jan', 'Feb', 'Mar', 'Apr',
-        'May', 'Jun', 'Jul', 'Aug',
-        'Sep', 'Oct', 'Nov', 'Dec'
-    ]
-
-    # Store yearly data
-    result = {}
-
-    # Check each available year
-    for year in [
-        '2022',
-        '2023',
-        '2024',
-        '2025',
-        '2026'
-    ]:
-
-        # Get monthly counts
-        c.execute(
-            """
-            SELECT
-                CAST(substr(date,4,2) AS INTEGER) mo,
-                COUNT(*) cnt
-            FROM road_accidents
-            WHERE substr(date,7,4)=?
-              AND date!=''
-            GROUP BY mo
-            ORDER BY mo
-            """,
-            (year,)
-        )
-
-        rows = c.fetchall()
-
-        # Start with zero for every month
-        data = [0] * 12
-
-        # Add actual values
-        for r in rows:
-
-            # Get month
-            mo = int(r['mo'])
-
-            # Store count
-            if 1 <= mo <= 12:
-                data[mo - 1] = r['cnt']
-
-        # Store year
-        result[year] = data
-
-    # Close database
-    conn.close()
-
-    # Return yearly data
-    return jsonify({
-        'labels': months_short,
-        'datasets': result
-    })
-
-
-# ===========================
-# Dashboard — Accidents by Hour
-# ===========================
-
-@app.route("/api/dashboard/by_hour")
-def dashboard_by_hour():
-
-    # Read filters
-    year = request.args.get('year', '')
-    severity = request.args.get('severity', '')
-    state = request.args.get('state', '')
-
-    # Store conditions
+def build_accident_filter(args):
+    """Build parameterized WHERE clause from request args."""
     conds = []
     params = []
 
-    # Year filter
-    if year:
-        conds.append(
-            "substr(date,7,4)=?"
-        )
-        params.append(str(year))
-
-    # Severity filter
-    if severity:
-        conds.append(
-            "LOWER(accident_severity)=?"
-        )
-        params.append(severity.lower())
-
-    # State filter
-    if state:
-        conds.append("state=?")
-        params.append(state)
-
-    # Require hour
-    conds.append("hour != ''")
-
-    # Build WHERE clause
-    where = 'WHERE ' + ' AND '.join(conds)
-
-    # Connect to database
-    conn = get_db()
-    c = conn.cursor()
-
-    # Get hourly counts
-    c.execute(
-        f"""
-        SELECT
-            CAST(hour AS INTEGER) h,
-            COUNT(*) cnt
-        FROM road_accidents
-        {where}
-        GROUP BY h
-        ORDER BY h
-        """,
-        params
-    )
-
-    rows = c.fetchall()
-
-    # Close database
-    conn.close()
-
-    # Create 24-hour array
-    counts = [0] * 24
-
-    # Add counts
-    for row in rows:
-
-        # Get hour
-        h = int(row['h'])
-
-        # Store valid hour
-        if 0 <= h <= 23:
-            counts[h] = row['cnt']
-
-    # Create labels
-    labels = [
-        f"{h:02d}:00"
-        for h in range(24)
-    ]
-
-    # Return data
-    return jsonify({
-        "labels": labels,
-        "values": counts
-    })
-
-
-# ===========================
-# Dashboard — Accidents by Cause
-# ===========================
-
-@app.route("/api/dashboard/by_cause")
-def dashboard_by_cause():
-
-    # Read filters
-    year = request.args.get('year', '')
-    severity = request.args.get('severity', '')
-    state = request.args.get('state', '')
-
-    # Store conditions
-    conds = []
-    params = []
-
-    # Year filter
-    if year:
-        conds.append(
-            "substr(date,7,4)=?"
-        )
-        params.append(str(year))
-
-    # Severity filter
-    if severity:
-        conds.append(
-            "LOWER(accident_severity)=?"
-        )
-        params.append(severity.lower())
-
-    # State filter
-    if state:
-        conds.append("state=?")
-        params.append(state)
-
-    # Require cause
-    conds.append("cause != ''")
-
-    # Build WHERE clause
-    where = 'WHERE ' + ' AND '.join(conds)
-
-    # Connect to database
-    conn = get_db()
-    c = conn.cursor()
-
-    # Get cause counts
-    c.execute(
-        f"""
-        SELECT
-            cause,
-            COUNT(*) cnt
-        FROM road_accidents
-        {where}
-        GROUP BY cause
-        ORDER BY cnt DESC
-        """,
-        params
-    )
-
-    rows = c.fetchall()
-
-    # Close database
-    conn.close()
-
-    # Return cause data
-    return jsonify({
-        "labels": [
-            r["cause"].title()
-            for r in rows
-        ],
-        "values": [
-            r["cnt"]
-            for r in rows
-        ]
-    })
-
-
-# ===========================
-# Dashboard — Accidents by Severity
-# ===========================
-
-@app.route("/api/dashboard/by_severity")
-def dashboard_by_severity():
-
-    # Connect to database
-    conn = get_db()
-    c = conn.cursor()
-
-    # Get severity counts
-    c.execute(
-        """
-        SELECT
-            accident_severity,
-            COUNT(*) cnt
-        FROM road_accidents
-        WHERE accident_severity != ''
-        GROUP BY accident_severity
-        ORDER BY cnt DESC
-        """
-    )
-
-    rows = c.fetchall()
-
-    # Close database
-    conn.close()
-
-    # Return severity data
-    return jsonify({
-        "labels": [
-            r["accident_severity"].title()
-            for r in rows
-        ],
-        "values": [
-            r["cnt"]
-            for r in rows
-        ]
-    })
-
-
-# ===========================
-# Dashboard — Accidents by Road Type
-# ===========================
-
-@app.route("/api/dashboard/by_road_type")
-def dashboard_by_road_type():
-
-    # Connect to database
-    conn = get_db()
-    c = conn.cursor()
-
-    # Get road type counts
-    c.execute(
-        """
-        SELECT
-            road_type,
-            COUNT(*) cnt
-        FROM road_accidents
-        WHERE road_type != ''
-        GROUP BY road_type
-        ORDER BY cnt DESC
-        """
-    )
-
-    rows = c.fetchall()
-
-    # Close database
-    conn.close()
-
-    # Return road type data
-    return jsonify({
-        "labels": [
-            r["road_type"].title()
-            for r in rows
-        ],
-        "values": [
-            r["cnt"]
-            for r in rows
-        ]
-    })
-
-
-# ===========================
-# Dashboard — Accidents by Weather
-# ===========================
-
-@app.route("/api/dashboard/by_weather")
-def dashboard_by_weather():
-
-    # Connect to database
-    conn = get_db()
-    c = conn.cursor()
-
-    # Get weather counts
-    c.execute(
-        """
-        SELECT
-            weather,
-            COUNT(*) cnt
-        FROM road_accidents
-        WHERE weather != ''
-        GROUP BY weather
-        ORDER BY cnt DESC
-        """
-    )
-
-    rows = c.fetchall()
-
-    # Close database
-    conn.close()
-
-    # Return weather data
-    return jsonify({
-        "labels": [
-            r["weather"].title()
-            for r in rows
-        ],
-        "values": [
-            r["cnt"]
-            for r in rows
-        ]
-    })
-
-
-# ===========================
-# Dashboard — Accidents by Weekday
-# ===========================
-
-@app.route("/api/dashboard/by_weekday")
-def dashboard_by_weekday():
-
-    # Read filters
-    year = request.args.get('year', '')
-    severity = request.args.get('severity', '')
-    state = request.args.get('state', '')
-
-    # Store conditions
-    conds = []
-    params = []
-
-    # Year filter
-    if year:
-        conds.append(
-            "substr(date,7,4)=?"
-        )
-        params.append(str(year))
-
-    # Severity filter
-    if severity:
-        conds.append(
-            "LOWER(accident_severity)=?"
-        )
-        params.append(severity.lower())
-
-    # State filter
-    if state:
-        conds.append("state=?")
-        params.append(state)
-
-    # Require weekday
-    conds.append(
-        "day_of_week != ''"
-    )
-
-    # Build WHERE clause
-    where = 'WHERE ' + ' AND '.join(conds)
-
-    # Order of weekdays
-    day_order = [
-        'Monday',
-        'Tuesday',
-        'Wednesday',
-        'Thursday',
-        'Friday',
-        'Saturday',
-        'Sunday'
-    ]
-
-    # Connect to database
-    conn = get_db()
-    c = conn.cursor()
-
-    # Get weekday counts
-    c.execute(
-        f"""
-        SELECT
-            day_of_week,
-            COUNT(*) cnt
-        FROM road_accidents
-        {where}
-        GROUP BY day_of_week
-        """,
-        params
-    )
-
-    rows = c.fetchall()
-
-    # Close database
-    conn.close()
-
-    # Convert rows into dictionary
-    day_map = {
-        r["day_of_week"]: r["cnt"]
-        for r in rows
-    }
-
-    # Arrange values Monday to Sunday
-    values = [
-        day_map.get(d, 0)
-        for d in day_order
-    ]
-
-    # Return weekday data
-    return jsonify({
-        "labels": [
-            'Mon',
-            'Tue',
-            'Wed',
-            'Thu',
-            'Fri',
-            'Sat',
-            'Sun'
-        ],
-        "values": values
-    })
-
-
-# ===========================
-# Dashboard — Accidents by Area
-# ===========================
-
-@app.route("/api/dashboard/by_area")
-def dashboard_by_area():
-
-    # Connect to database
-    conn = get_db()
-    c = conn.cursor()
-
-    # Get top accident areas
-    c.execute(
-        """
-        SELECT
-            area,
-            COUNT(*) cnt
-        FROM road_accidents
-        WHERE area != ''
-        GROUP BY area
-        ORDER BY cnt DESC
-        LIMIT 10
-        """
-    )
-
-    rows = c.fetchall()
-
-    # Close database
-    conn.close()
-
-    # Return area data
-    return jsonify({
-        "labels": [
-            r["area"]
-            for r in rows
-        ],
-        "values": [
-            r["cnt"]
-            for r in rows
-        ]
-    })
-
-
-# ===========================
-# Dashboard — Accidents by State
-# ===========================
-
-@app.route("/api/dashboard/by_state")
-def dashboard_by_state():
-
-    # Return Kochi areas for compatibility
-    conn = get_db()
-    c = conn.cursor()
-
-    # Get top areas
-    c.execute(
-        """
-        SELECT
-            area,
-            COUNT(*) cnt
-        FROM road_accidents
-        WHERE area != ''
-        GROUP BY area
-        ORDER BY cnt DESC
-        LIMIT 10
-        """
-    )
-
-    rows = c.fetchall()
-
-    # Close database
-    conn.close()
-
-    # Return area data
-    return jsonify({
-        "labels": [
-            r["area"]
-            for r in rows
-        ],
-        "values": [
-            r["cnt"]
-            for r in rows
-        ]
-    })
-
-
-# ===========================
-# Dashboard — Recent Accidents
-# ===========================
-
-@app.route("/api/dashboard/recent")
-def dashboard_recent():
-
-    # Get requested number of records
-    limit = request.args.get(
-        "limit",
-        15,
-        type=int
-    )
-
-    # Read filters
-    year = request.args.get('year', '')
-    severity = request.args.get('severity', '')
-    area = request.args.get('area', '')
-
-    # Store conditions
-    conds = []
-    params = []
-
-    # Year filter
-    if year:
-        conds.append(
-            "substr(date,7,4)=?"
-        )
-        params.append(str(year))
-
-    # Severity filter
-    if severity:
-        conds.append(
-            "LOWER(accident_severity)=?"
-        )
-        params.append(severity.lower())
-
-    # Area filter
-    if area:
-        conds.append("area=?")
-        params.append(area)
-
-    # Require date
-    conds.append(
-        'date != ""'
-    )
-
-    # Build WHERE clause
-    where = 'WHERE ' + ' AND '.join(conds)
-
-    # Add limit parameter
-    params_lim = params + [limit]
-
-    # Connect to database
-    conn = get_db()
-    c = conn.cursor()
-
-    # Get recent accidents
-    c.execute(
-        f"""
-        SELECT
-            accident_id,
-            city,
-            state,
-            area,
-            road_name,
-            date,
-            time,
-            accident_severity,
-            cause,
-            road_type,
-            weather,
-            vehicles_involved,
-            casualties,
-            risk_score
-        FROM road_accidents
-        {where}
-        ORDER BY
-            substr(date,7,4) DESC,
-            substr(date,4,2) DESC,
-            substr(date,1,2) DESC
-        LIMIT ?
-        """,
-        params_lim
-    )
-
-    rows = c.fetchall()
-
-    # Close database
-    conn.close()
-
-    # Prepare response
-    result = []
-
-    for r in rows:
-
-        # Add accident information
-        result.append({
-            "id": r["accident_id"],
-            "city": r["city"],
-            "state": r["state"],
-            "area": r["area"] or "",
-            "road_name": r["road_name"] or "",
-            "date": r["date"],
-            "time": r["time"],
-            "severity": r["accident_severity"],
-            "cause": r["cause"],
-            "road_type": r["road_type"],
-            "weather": r["weather"],
-            "vehicles": r["vehicles_involved"],
-            "casualties": r["casualties"],
-            "risk_score": r["risk_score"]
-        })
-
-    # Return recent accidents
-    return jsonify(result)
-
-
-# ===========================
-# Dashboard — Traffic Density
-# ===========================
-
-@app.route("/api/dashboard/by_traffic_density")
-def dashboard_by_traffic_density():
-
-    # Connect to database
-    conn = get_db()
-    c = conn.cursor()
-
-    # Get traffic density counts
-    c.execute(
-        """
-        SELECT
-            traffic_density,
-            COUNT(*) cnt
-        FROM road_accidents
-        WHERE traffic_density != ''
-        GROUP BY traffic_density
-        ORDER BY cnt DESC
-        """
-    )
-
-    rows = c.fetchall()
-
-    # Close database
-    conn.close()
-
-    # Return traffic density data
-    return jsonify({
-        "labels": [
-            r["traffic_density"].title()
-            for r in rows
-        ],
-        "values": [
-            r["cnt"]
-            for r in rows
-        ]
-    })
-
-
-# ===========================
-# PB-07: Interactive Accident Hotspots & Danger Zones
-# ===========================
-
-@app.route("/api/hotspots")
-def get_accident_hotspots():
-    """Return aggregated accident hotspot locations and danger zone analytics."""
-    year = request.args.get("year", "").strip()
-    severity = request.args.get("severity", "").strip()
-    road_type = request.args.get("road_type", "").strip()
-    area = request.args.get("area", "").strip()
-
-    conn = get_db()
-    c = conn.cursor()
-
-    # Dynamic conditions
-    conds = ["latitude IS NOT NULL", "latitude != ''", "road_name != ''"]
-    params = []
-
-    if year:
-        conds.append("substr(date, 7, 4) = ?")
-        params.append(str(year))
-    if severity:
-        conds.append("LOWER(accident_severity) = ?")
-        params.append(severity.lower())
-    if road_type:
-        conds.append("LOWER(road_type) = ?")
-        params.append(road_type.lower())
+    year = args.get('year', '').strip()
+    if year and year.isdigit():
+        conds.append("year = ?")
+        params.append(int(year))
+
+    severity = args.get('severity', '').strip().lower()
+    if severity in ['minor', 'major', 'fatal']:
+        conds.append("severity = ?")
+        params.append(severity)
+
+    area = args.get('area', '').strip()
     if area:
         conds.append("area = ?")
         params.append(area)
 
-    where_clause = "WHERE " + " AND ".join(conds)
+    road_type = args.get('road_type', '').strip().lower()
+    if road_type:
+        conds.append("road_type = ?")
+        params.append(road_type)
 
-    query = f"""
-        SELECT
-            road_name,
-            area,
-            ROUND(AVG(CAST(latitude AS FLOAT)), 6) AS lat,
-            ROUND(AVG(CAST(longitude AS FLOAT)), 6) AS lng,
-            COUNT(*) AS total_accidents,
-            SUM(CASE WHEN LOWER(accident_severity) = 'fatal' THEN 1 ELSE 0 END) AS fatal_accidents,
-            SUM(CASE WHEN LOWER(accident_severity) = 'major' THEN 1 ELSE 0 END) AS major_accidents,
-            SUM(CASE WHEN LOWER(accident_severity) = 'minor' THEN 1 ELSE 0 END) AS minor_accidents,
-            ROUND(AVG(CAST(risk_score AS FLOAT)) * 100, 1) AS avg_risk,
-            road_type,
-            cause
-        FROM road_accidents
-        {where_clause}
-        GROUP BY road_name, area
-        ORDER BY fatal_accidents DESC, major_accidents DESC, total_accidents DESC
-    """
+    cause = args.get('cause', '').strip().lower()
+    if cause:
+        conds.append("cause = ?")
+        params.append(cause)
 
-    c.execute(query, params)
-    rows = c.fetchall()
+    data_source = args.get('data_source', '').strip().lower()
+    if data_source in ['real', 'synthetic', 'sample']:
+        conds.append("data_source = ?")
+        params.append(data_source)
 
-    hotspots = []
-    total_accidents_all = 0
-    total_fatal_all = 0
-    tier_counts = {"veryhigh": 0, "high": 0, "moderate": 0, "low": 0}
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
+    return where, params
 
-    # Calculate max fatal to calibrate danger scores
-    max_fatal = max([r["fatal_accidents"] for r in rows], default=1) or 1
-    max_total = max([r["total_accidents"] for r in rows], default=1) or 1
+# ===========================
+# Dashboard Analytics Endpoints
+# ===========================
+@app.route("/api/dashboard/stats")
+@login_required
+def dashboard_stats():
+    where, params = build_accident_filter(request.args)
+    conn = get_db()
+    c = conn.cursor()
 
-    for idx, r in enumerate(rows):
-        total = int(r["total_accidents"])
-        fatal = int(r["fatal_accidents"])
-        major = int(r["major_accidents"])
-        minor = int(r["minor_accidents"])
+    total = c.execute(f"SELECT COUNT(*) FROM accidents {where}", params).fetchone()[0]
 
-        total_accidents_all += total
-        total_fatal_all += fatal
+    # Parameterized severity counts
+    sev_where = f"{where} AND severity = ?" if where else "WHERE severity = ?"
+    fatal = c.execute(f"SELECT COUNT(*) FROM accidents {sev_where}", params + ['fatal']).fetchone()[0]
+    major = c.execute(f"SELECT COUNT(*) FROM accidents {sev_where}", params + ['major']).fetchone()[0]
+    minor = c.execute(f"SELECT COUNT(*) FROM accidents {sev_where}", params + ['minor']).fetchone()[0]
 
-        # Composite Danger Score (0 - 100)
-        danger_score = round(
-            min(100.0, ((fatal / max_fatal) * 60.0) + ((major / (max_fatal or 1)) * 25.0) + ((total / max_total) * 15.0)),
-            1
-        )
+    casualties = c.execute(f"SELECT SUM(casualties) FROM accidents {where}", params).fetchone()[0] or 0
 
-        if danger_score >= 75 or fatal >= 60:
-            tier = "veryhigh"
-            danger_level = "Critical Danger Zone"
-            color = "#F04438"
-            radius = 380
-        elif danger_score >= 50 or fatal >= 42:
-            tier = "high"
-            danger_level = "High Danger Zone"
-            color = "#F79009"
-            radius = 290
-        elif danger_score >= 30 or fatal >= 25:
-            tier = "moderate"
-            danger_level = "Moderate Risk Zone"
-            color = "#EAB308"
-            radius = 210
-        else:
-            tier = "low"
-            danger_level = "Low Risk Zone"
-            color = "#17B26A"
-            radius = 150
+    # Historical severity index calculated transparently from crash mix (Fatal=1.0, Major=0.5, Minor=0.1)
+    if total > 0:
+        hist_severity_index = round((fatal * 1.0 + major * 0.5 + minor * 0.1) / total, 3)
+    else:
+        hist_severity_index = 0.0
 
-        tier_counts[tier] += 1
-
-        cause_text = (r["cause"] or "Unknown").replace("_", " ").title()
-        road_type_text = (r["road_type"] or "Urban").capitalize()
-
-        hotspots.append({
-            "id": idx + 1,
-            "name": r["road_name"],
-            "area": r["area"],
-            "lat": float(r["lat"]),
-            "lng": float(r["lng"]),
-            "total_accidents": total,
-            "fatal_accidents": fatal,
-            "major_accidents": major,
-            "minor_accidents": minor,
-            "avg_risk": float(r["avg_risk"] or 0),
-            "danger_score": danger_score,
-            "danger_level": danger_level,
-            "tier": tier,
-            "color": color,
-            "radius": radius,
-            "top_cause": cause_text,
-            "road_type": road_type_text
-        })
-
-    # Available areas
-    c.execute("SELECT DISTINCT area FROM road_accidents WHERE area != '' ORDER BY area")
-    areas = [ar["area"] for ar in c.fetchall()]
-
-    # Available years
-    c.execute("SELECT DISTINCT substr(date, 7, 4) as yr FROM road_accidents WHERE yr != '' ORDER BY yr DESC")
-    years = [y["yr"] for y in c.fetchall()]
-
+    # Provenance split
+    src_rows = c.execute(f"SELECT data_source, COUNT(*) FROM accidents {where} GROUP BY data_source", params).fetchall()
+    source_mix = {r[0]: r[1] for r in src_rows}
     conn.close()
 
-    top_danger = hotspots[0] if hotspots else None
-
     return jsonify({
-        "status": "success",
-        "hotspots": hotspots,
-        "stats": {
-            "total_hotspots": len(hotspots),
-            "total_accidents": total_accidents_all,
-            "total_fatal": total_fatal_all,
-            "very_high_count": tier_counts["veryhigh"],
-            "high_count": tier_counts["high"],
-            "moderate_count": tier_counts["moderate"],
-            "low_count": tier_counts["low"],
-            "top_danger_zone": top_danger
-        },
-        "areas": areas,
-        "years": years
+        "success": True,
+        "total": total,
+        "fatal": fatal,
+        "major": major,
+        "minor": minor,
+        "casualties": casualties,
+        "avg_risk": hist_severity_index,
+        "historical_severity_index": hist_severity_index,
+        "source_mix": source_mix,
+        "disclaimer": "Statistics reflect synthetic/sample Kochi research dataset for demonstration."
     })
 
+@app.route("/api/dashboard/trend")
+@login_required
+def dashboard_trend():
+    where, params = build_accident_filter(request.args)
+    conn = get_db()
+    c = conn.cursor()
+    # Monthly trend using ISO formatted substr(occurred_at, 1, 7) 'YYYY-MM'
+    query = f"""
+        SELECT substr(occurred_at, 1, 7) as month_label, COUNT(*) as cnt
+        FROM accidents
+        {where}
+        GROUP BY month_label
+        ORDER BY month_label ASC
+        LIMIT 36
+    """
+    rows = c.execute(query, params).fetchall()
+    conn.close()
+    return jsonify({
+        "success": True,
+        "labels": [r['month_label'] for r in rows],
+        "values": [r['cnt'] for r in rows]
+    })
+
+@app.route("/api/dashboard/trend_by_year")
+@login_required
+def dashboard_trend_by_year():
+    where, params = build_accident_filter(request.args)
+    conn = get_db()
+    c = conn.cursor()
+    query = f"""
+        SELECT year, COUNT(*) as cnt
+        FROM accidents
+        {where}
+        GROUP BY year
+        ORDER BY year ASC
+    """
+    rows = c.execute(query, params).fetchall()
+    conn.close()
+    return jsonify({
+        "success": True,
+        "labels": [str(r['year']) for r in rows],
+        "values": [r['cnt'] for r in rows]
+    })
+
+@app.route("/api/dashboard/by_hour")
+@login_required
+def dashboard_by_hour():
+    where, params = build_accident_filter(request.args)
+    conn = get_db()
+    c = conn.cursor()
+    query = f"""
+        SELECT hour, COUNT(*) as cnt
+        FROM accidents
+        {where}
+        GROUP BY hour
+        ORDER BY hour ASC
+    """
+    rows = dict(c.execute(query, params).fetchall())
+    conn.close()
+
+    all_hours = list(range(24))
+    return jsonify({
+        "success": True,
+        "labels": [f"{h:02d}:00" for h in all_hours],
+        "values": [rows.get(h, 0) for h in all_hours]
+    })
+
+@app.route("/api/dashboard/by_cause")
+@login_required
+def dashboard_by_cause():
+    where, params = build_accident_filter(request.args)
+    conn = get_db()
+    c = conn.cursor()
+    query = f"""
+        SELECT cause, COUNT(*) as cnt
+        FROM accidents
+        {where}
+        GROUP BY cause
+        ORDER BY cnt DESC
+    """
+    rows = c.execute(query, params).fetchall()
+    conn.close()
+    return jsonify({
+        "success": True,
+        "labels": [r['cause'].title() for r in rows],
+        "values": [r['cnt'] for r in rows]
+    })
+
+@app.route("/api/dashboard/by_severity")
+@login_required
+def dashboard_by_severity():
+    where, params = build_accident_filter(request.args)
+    conn = get_db()
+    c = conn.cursor()
+    query = f"""
+        SELECT severity, COUNT(*) as cnt
+        FROM accidents
+        {where}
+        GROUP BY severity
+    """
+    rows = dict(c.execute(query, params).fetchall())
+    conn.close()
+    return jsonify({
+        "success": True,
+        "labels": ["Minor", "Major", "Fatal"],
+        "values": [rows.get("minor", 0), rows.get("major", 0), rows.get("fatal", 0)]
+    })
+
+@app.route("/api/dashboard/by_road_type")
+@login_required
+def dashboard_by_road_type():
+    where, params = build_accident_filter(request.args)
+    conn = get_db()
+    c = conn.cursor()
+    query = f"""
+        SELECT road_type, COUNT(*) as cnt
+        FROM accidents
+        {where}
+        GROUP BY road_type
+        ORDER BY cnt DESC
+    """
+    rows = c.execute(query, params).fetchall()
+    conn.close()
+    return jsonify({
+        "success": True,
+        "labels": [r['road_type'].title() for r in rows],
+        "values": [r['cnt'] for r in rows]
+    })
+
+@app.route("/api/dashboard/by_weather")
+@login_required
+def dashboard_by_weather():
+    where, params = build_accident_filter(request.args)
+    conn = get_db()
+    c = conn.cursor()
+    query = f"""
+        SELECT weather, COUNT(*) as cnt
+        FROM accidents
+        {where}
+        GROUP BY weather
+        ORDER BY cnt DESC
+    """
+    rows = c.execute(query, params).fetchall()
+    conn.close()
+    return jsonify({
+        "success": True,
+        "labels": [r['weather'].title() for r in rows],
+        "values": [r['cnt'] for r in rows]
+    })
+
+@app.route("/api/dashboard/by_weekday")
+@login_required
+def dashboard_by_weekday():
+    where, params = build_accident_filter(request.args)
+    conn = get_db()
+    c = conn.cursor()
+    query = f"""
+        SELECT day_of_week, COUNT(*) as cnt
+        FROM accidents
+        {where}
+        GROUP BY day_of_week
+    """
+    counts = dict(c.execute(query, params).fetchall())
+    conn.close()
+
+    order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    return jsonify({
+        "success": True,
+        "labels": order,
+        "values": [counts.get(d, 0) for d in order]
+    })
+
+@app.route("/api/dashboard/by_area")
+@login_required
+def dashboard_by_area():
+    where, params = build_accident_filter(request.args)
+    conn = get_db()
+    c = conn.cursor()
+    query = f"""
+        SELECT area, COUNT(*) as cnt
+        FROM accidents
+        {where}
+        GROUP BY area
+        ORDER BY cnt DESC
+    """
+    rows = c.execute(query, params).fetchall()
+    conn.close()
+    return jsonify({
+        "success": True,
+        "labels": [r['area'] for r in rows],
+        "values": [r['cnt'] for r in rows]
+    })
+
+@app.route("/api/dashboard/by_state")
+@login_required
+def dashboard_by_state():
+    # Dataset is centered on Kochi, Kerala
+    return jsonify({
+        "success": True,
+        "labels": ["Kerala (Kochi)"],
+        "values": [100]
+    })
+
+@app.route("/api/dashboard/by_traffic_density")
+@login_required
+def dashboard_by_traffic_density():
+    where, params = build_accident_filter(request.args)
+    conn = get_db()
+    c = conn.cursor()
+    query = f"""
+        SELECT traffic_density, COUNT(*) as cnt
+        FROM accidents
+        {where}
+        GROUP BY traffic_density
+    """
+    counts = dict(c.execute(query, params).fetchall())
+    conn.close()
+    labels = ["Low", "Medium", "High"]
+    return jsonify({
+        "success": True,
+        "labels": labels,
+        "values": [counts.get("low", 0), counts.get("medium", 0), counts.get("high", 0)]
+    })
+
+@app.route("/api/dashboard/recent")
+@login_required
+def dashboard_recent():
+    limit = min(int(request.args.get('limit', 10)), 50)
+    conn = get_db()
+    c = conn.cursor()
+    query = """
+        SELECT accident_uid, occurred_at, area, road_name, severity, cause, casualties, data_source
+        FROM accidents
+        ORDER BY occurred_at DESC
+        LIMIT ?
+    """
+    rows = [dict(r) for r in c.execute(query, (limit,)).fetchall()]
+    conn.close()
+    return jsonify({"success": True, "records": rows})
 
 # ===========================
-# Kerala ML Severity Prediction & Metadata Endpoints
+# Hotspots Module (Fixed Formula & Quantiles)
 # ===========================
+@app.route("/api/hotspots")
+@login_required
+def get_accident_hotspots():
+    where, params = build_accident_filter(request.args)
+    conn = get_db()
+    c = conn.cursor()
 
-@app.route("/api/kerala-metadata", methods=["GET"])
-def get_kerala_metadata():
-    """Returns available Kochi areas, road networks, weather, and feature options for ML form."""
-    try:
-        meta_path = os.path.join(BASE_DIR, "ml", "models", "kerala_features_metadata.json")
-        if os.path.exists(meta_path):
-            with open(meta_path, "r", encoding="utf-8") as f:
-                metadata = json.load(f)
-            return jsonify({"status": "success", "metadata": metadata})
-        return jsonify({"status": "error", "message": "Metadata file not found"}), 404
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+    # Fixed danger score query:
+    # Danger Score = 100 * (3.0 * fatal + 1.5 * major + 0.5 * minor) / max_score
+    query = f"""
+        SELECT 
+            area,
+            road_name,
+            ROUND(AVG(latitude), 5) as latitude,
+            ROUND(AVG(longitude), 5) as longitude,
+            COUNT(*) as total_accidents,
+            SUM(CASE WHEN severity = 'fatal' THEN 1 ELSE 0 END) as fatal_count,
+            SUM(CASE WHEN severity = 'major' THEN 1 ELSE 0 END) as major_count,
+            SUM(CASE WHEN severity = 'minor' THEN 1 ELSE 0 END) as minor_count,
+            SUM(casualties) as total_casualties,
+            (
+                SELECT cause FROM accidents a2 
+                WHERE a2.road_name = a1.road_name AND a2.area = a1.area 
+                GROUP BY cause ORDER BY COUNT(*) DESC LIMIT 1
+            ) as primary_cause,
+            (
+                SELECT road_type FROM accidents a3 
+                WHERE a3.road_name = a1.road_name AND a3.area = a1.area 
+                GROUP BY road_type ORDER BY COUNT(*) DESC LIMIT 1
+            ) as road_type
+        FROM accidents a1
+        {where}
+        GROUP BY area, road_name
+        HAVING total_accidents >= 3
+        ORDER BY total_accidents DESC
+    """
+    rows = [dict(r) for r in c.execute(query, params).fetchall()]
+    conn.close()
 
+    if not rows:
+        return jsonify({"success": True, "hotspots": [], "total_hotspots": 0})
 
+    # Compute raw danger scores
+    raw_scores = []
+    for r in rows:
+        score = 3.0 * r['fatal_count'] + 1.5 * r['major_count'] + 0.5 * r['minor_count']
+        raw_scores.append(score)
+
+    max_score = max(raw_scores) if raw_scores and max(raw_scores) > 0 else 1.0
+
+    # Assign normalized danger scores (0 - 100) and quantile-based tiers
+    scores = [(s / max_score) * 100.0 for s in raw_scores]
+    p90 = np.percentile(scores, 90) if len(scores) > 5 else 75
+    p70 = np.percentile(scores, 70) if len(scores) > 5 else 50
+    p40 = np.percentile(scores, 40) if len(scores) > 5 else 25
+
+    hotspots = []
+    for i, r in enumerate(rows):
+        normalized_score = round(scores[i], 1)
+        if normalized_score >= p90:
+            tier = "Critical"
+        elif normalized_score >= p70:
+            tier = "High"
+        elif normalized_score >= p40:
+            tier = "Moderate"
+        else:
+            tier = "Low"
+
+        r['danger_score'] = normalized_score
+        r['tier'] = tier
+        hotspots.append(r)
+
+    # Sort by danger score descending
+    hotspots.sort(key=lambda x: x['danger_score'], reverse=True)
+
+    return jsonify({
+        "success": True,
+        "total_hotspots": len(hotspots),
+        "hotspots": hotspots,
+        "disclaimer": "Historical spatial concentration of recorded accidents. Not a physical prediction of future crashes."
+    })
+
+# ===========================
+# Model Metadata & Info
+# ===========================
+@app.route("/api/model-metadata")
+@app.route("/api/kerala-metadata")  # Backward-compatible alias
+@login_required
+def get_model_metadata():
+    if not ml_artifacts["loaded"]:
+        load_ml_artifacts()
+    return jsonify({
+        "success": True,
+        "metadata": ml_artifacts.get("metadata", {}),
+        "model_name": "Kochi Accident Severity Classifier",
+        "city": "Kochi",
+        "state": "Kerala"
+    })
+
+@app.route("/api/model-info")
+@login_required
+def get_model_info():
+    if not ml_artifacts["loaded"]:
+        load_ml_artifacts()
+    card = ml_artifacts.get("model_card") or {}
+    return jsonify({
+        "success": True,
+        "model_info": card
+    })
+
+# ===========================
+# Prediction & Explainability (P5.1 - P5.9)
+# ===========================
 @app.route("/api/predict-severity", methods=["POST"])
-def predict_kerala_severity():
-    """
-    Dedicated ML Severity Predictor trained on 91,686 Kerala records.
-    Accepts scenario features, performs XGBoost multi-class prediction,
-    and returns SHAP feature attributions with targeted preventive recommendations.
-    """
+@login_required
+def predict_accident_severity():
+    if not ml_artifacts["loaded"]:
+        if not load_ml_artifacts():
+            return jsonify({
+                "success": False,
+                "error": "ML model not loaded. Run 'python backend/ml/train.py --seed 42' on the server."
+            }), 500
+
+    data = request.get_json(silent=True) or {}
+    meta = ml_artifacts["metadata"] or {}
+
+    # Strict Input Validation (P5.1)
+    area = data.get("area", "").strip()
+    road_name = data.get("road_name", "").strip()
+    road_type = data.get("road_type", "").strip().lower()
+    weather = data.get("weather", "").strip().lower()
+    visibility = data.get("visibility", "").strip().lower()
+    traffic_density = data.get("traffic_density", "").strip().lower()
+    cause = data.get("cause", "").strip().lower()
+    day_of_week = data.get("day_of_week", "").strip().title()
+
+    valid_areas = meta.get("areas", [])
+    valid_area_roads = meta.get("area_roads", {})
+
+    if area not in valid_areas:
+        return jsonify({"success": False, "error": f"Invalid area '{area}'. Must be one of: {valid_areas}"}), 400
+
+    valid_roads_for_area = valid_area_roads.get(area, [])
+    if road_name not in valid_roads_for_area:
+        return jsonify({"success": False, "error": f"Road '{road_name}' does not belong to area '{area}'."}), 400
+
+    if road_type not in ["highway", "urban"]:
+        return jsonify({"success": False, "error": "Invalid road_type. Must be 'highway' or 'urban'."}), 400
+
+    if weather not in ["clear", "fog", "rain"]:
+        return jsonify({"success": False, "error": "Invalid weather. Must be 'clear', 'fog', or 'rain'."}), 400
+
+    if visibility not in ["low", "medium", "high"]:
+        return jsonify({"success": False, "error": "Invalid visibility. Must be 'low', 'medium', or 'high'."}), 400
+
+    if traffic_density not in ["low", "medium", "high"]:
+        return jsonify({"success": False, "error": "Invalid traffic_density. Must be 'low', 'medium', or 'high'."}), 400
+
+    if cause not in ["overspeeding", "drunk driving", "distraction", "poor road", "weather"]:
+        return jsonify({"success": False, "error": "Invalid cause selection."}), 400
+
+    if day_of_week not in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]:
+        return jsonify({"success": False, "error": "Invalid day_of_week."}), 400
+
     try:
-        data = request.get_json(silent=True) or {}
+        lanes = int(data.get("lanes", 2))
+        traffic_signal = int(data.get("traffic_signal", 0))
+        hour = int(data.get("hour", 12))
+        vehicles_involved = int(data.get("vehicles_involved", 1))
 
-        # 1. Parse date and time to extract day_of_week and hour
-        date_str = data.get("date", "2026-05-24")
-        time_str = data.get("time", "18:30")
+        if not (1 <= lanes <= 8):
+            raise ValueError("Lanes must be between 1 and 8.")
+        if traffic_signal not in [0, 1]:
+            raise ValueError("traffic_signal must be 0 or 1.")
+        if not (0 <= hour <= 23):
+            raise ValueError("Hour must be between 0 and 23.")
+        if not (1 <= vehicles_involved <= 20):
+            raise ValueError("vehicles_involved must be between 1 and 20.")
+    except (ValueError, TypeError) as e:
+        return jsonify({"success": False, "error": f"Numeric parameter validation failed: {e}"}), 400
 
-        import datetime
-        try:
-            dt = datetime.datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
-            day_of_week = dt.strftime("%A")
-            hour = dt.hour
-        except Exception:
-            day_of_week = "Friday"
-            hour = 18
+    # Build input DataFrame
+    input_dict = {
+        "area": area,
+        "road_name": road_name,
+        "road_type": road_type,
+        "weather": weather,
+        "visibility": visibility,
+        "traffic_density": traffic_density,
+        "cause": cause,
+        "day_of_week": day_of_week,
+        "lanes": lanes,
+        "traffic_signal": traffic_signal,
+        "hour": hour,
+        "vehicles_involved": vehicles_involved
+    }
+    input_df = pd.DataFrame([input_dict])
 
-        # 2. Extract features with defaults matching Kerala dataset
-        sample_dict = {
-            "area": str(data.get("area", "Edappally")).strip(),
-            "road_name": str(data.get("road_name", "Rajagiri Road")).strip(),
-            "road_type": str(data.get("road_type", "urban")).strip().lower(),
-            "weather": str(data.get("weather", "clear")).strip().lower(),
-            "visibility": str(data.get("visibility", "high")).strip().lower(),
-            "traffic_density": str(data.get("traffic_density", "high")).strip().lower(),
-            "cause": str(data.get("cause", "overspeeding")).strip().lower(),
-            "day_of_week": day_of_week,
-            "lanes": int(data.get("lanes", 2)),
-            "traffic_signal": int(data.get("traffic_signal", 0)),
-            "hour": int(hour),
-            "vehicles_involved": int(data.get("vehicles_involved", 2))
-        }
+    preprocessor = ml_artifacts["preprocessor"]
+    model = ml_artifacts["model"]
+    explainer = ml_artifacts["explainer"]
 
-        # 3. Create DataFrame and preprocess
-        input_df = pd.DataFrame([sample_dict])
-        X_proc = kerala_ml_preprocessor.transform(input_df)
+    # Transform features
+    X_proc = preprocessor.transform(input_df)
 
-        # 4. Predict severity and class probabilities
-        pred_idx = int(kerala_ml_model.predict(X_proc)[0])
-        probabilities = kerala_ml_model.predict_proba(X_proc)[0]
+    # Predict Calibrated Probabilities
+    probs = model.predict_proba(X_proc)[0]  # [p_minor, p_major, p_fatal]
+    pred_idx = int(np.argmax(probs))
+    label_map = {0: "minor", 1: "major", 2: "fatal"}
+    pred_label = label_map[pred_idx]
+    pred_prob = float(probs[pred_idx])
 
-        severity_label = kerala_ml_mapping.get(pred_idx, "Minor Severity")
-        confidence = round(float(probabilities[pred_idx]) * 100.0, 2)
+    # Expected Severity Score: (P(major)*0.5 + P(fatal)*1.0) * 100
+    expected_severity_score = round(float((float(probs[1]) * 0.5 + float(probs[2]) * 1.0) * 100.0), 1)
 
-        prob_dict = {
-            kerala_ml_mapping.get(i, f"Class {i}"): round(float(p) * 100.0, 2)
-            for i, p in enumerate(probabilities)
-        }
+    # Compute SHAP values for the predicted class
+    shap_raw = explainer.shap_values(X_proc)
+    if isinstance(shap_raw, list):
+        class_shap = shap_raw[pred_idx][0]
+    elif len(shap_raw.shape) == 3:
+        class_shap = shap_raw[0, :, pred_idx]
+    else:
+        class_shap = shap_raw[0]
 
-        # 5. Compute SHAP explanations
-        shap_vals = kerala_shap_explainer.shap_values(X_proc)
-        shap_arr = np.array(shap_vals)
-        if len(shap_arr.shape) == 3:
-            class_shap = shap_arr[0, :, pred_idx]
+    # Decode encoded feature names
+    cat_enc = preprocessor.named_transformers_['cat']
+    encoded_cat_names = cat_enc.get_feature_names_out(meta.get("cat_features", [])).tolist()
+    all_feature_names = encoded_cat_names + meta.get("num_features", [])
+
+    # Map SHAP back to original features
+    feature_contributions = []
+    for f_name, s_val in zip(all_feature_names, class_shap):
+        if "_" in f_name and not f_name.startswith("traffic_"):
+            orig_feature, val = f_name.split("_", 1)
+        elif f_name.startswith("traffic_density_"):
+            orig_feature, val = "traffic_density", f_name.replace("traffic_density_", "")
+        elif f_name.startswith("traffic_signal"):
+            orig_feature, val = "traffic_signal", str(traffic_signal)
         else:
-            class_shap = shap_arr[pred_idx][0]
+            orig_feature = f_name
+            val = str(input_dict.get(f_name, ""))
 
-        feature_names = kerala_ml_preprocessor.get_feature_names_out()
-
-        # Group one-hot encoded features back to readable names
-        factors = []
-        for name, val in zip(feature_names, class_shap):
-            clean_name = name.replace("cat__", "").replace("num__", "")
-            shap_v = float(val)
-            if abs(shap_v) > 0.001:
-                parts = clean_name.split("_", 1)
-                field = parts[0].title()
-                val_repr = parts[1].replace("_", " ").title() if len(parts) > 1 else ""
-                display_title = f"{field}: {val_repr}" if val_repr else field
-
-                factors.append({
-                    "feature": display_title,
-                    "raw_feature": clean_name,
-                    "shap_value": round(shap_v, 4),
-                    "abs_value": abs(shap_v),
-                    "impact": "Increases Risk" if shap_v > 0 else "Decreases Risk"
-                })
-
-        # Sort by absolute SHAP attribution
-        factors.sort(key=lambda x: x["abs_value"], reverse=True)
-        top_factors = factors[:7]
-
-        # 6. Generate Contextual AI Recommendations based on dominant factors
-        recommendations = []
-        cause_val = sample_dict["cause"]
-        weather_val = sample_dict["weather"]
-        density_val = sample_dict["traffic_density"]
-        signal_val = sample_dict["traffic_signal"]
-        vis_val = sample_dict["visibility"]
-
-        if cause_val == "overspeeding":
-            recommendations.append({
-                "title": "Automated Speed Enforcement",
-                "badge": "Enforcement",
-                "desc": "Deploy automated speed radar cameras and optical vehicle speed monitors along this segment."
-            })
-        elif cause_val == "drunk driving":
-            recommendations.append({
-                "title": "Drunk Driving Intercepts",
-                "badge": "Patrol",
-                "desc": "Establish evening breathalyzer sobriety checkpoints and mobile highway police patrols."
-            })
-        elif cause_val == "poor road":
-            recommendations.append({
-                "title": "Road Surface Rehabilitation",
-                "badge": "Infrastructure",
-                "desc": "Dispatch rapid road maintenance teams to patch potholes and resurface high-friction asphalt."
-            })
-
-        if weather_val == "rain":
-            recommendations.append({
-                "title": "Monsoon Skid Management",
-                "badge": "Weather",
-                "desc": "Activate variable digital messaging signs warning of wet pavement, reduce speed limits by 15 km/h."
-            })
-        elif weather_val == "fog" or vis_val == "low":
-            recommendations.append({
-                "title": "Low Visibility Illumination",
-                "badge": "Lighting",
-                "desc": "Upgrade street lighting to high-candela amber fog LEDs and reflective cat-eyes."
-            })
-
-        if signal_val == 0:
-            recommendations.append({
-                "title": "Traffic Signal Installation",
-                "badge": "Signal",
-                "desc": "Upgrade uncontrolled junction with smart adaptive AI traffic signals to regulate right-of-way."
-            })
-        elif density_val == "high":
-            recommendations.append({
-                "title": "Congestion Flow Modulation",
-                "badge": "Traffic Flow",
-                "desc": "Adjust green phase splits during peak hours and deploy traffic wardens at bottleneck points."
-            })
-
-        if len(recommendations) < 3:
-            recommendations.append({
-                "title": "Road Safety Auditing",
-                "badge": "Audit",
-                "desc": "Conduct an on-site joint road safety inspection with Kerala MVD and Kochi Traffic Police."
-            })
-
-        return jsonify({
-            "success": True,
-            "status": "success",
-            "predicted_severity": severity_label,
-            "confidence": confidence,
-            "probabilities": prob_dict,
-            "input_summary": sample_dict,
-            "top_factors": top_factors,
-            "recommendations": recommendations[:3]
+        direction = "supports" if s_val >= 0 else "opposes"
+        feature_contributions.append({
+            "feature": f_name,
+            "original_feature": orig_feature,
+            "value": val,
+            "shap_value": round(float(s_val), 4),
+            "direction": direction,
+            "label": f"Supports: {pred_label.title()}" if direction == "supports" else f"Opposes: {pred_label.title()}"
         })
 
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"success": False, "status": "error", "error": str(e)}), 500
+    # Sort by absolute SHAP magnitude
+    feature_contributions.sort(key=lambda x: abs(x["shap_value"]), reverse=True)
+    top_7_features = feature_contributions[:7]
 
+    # Generate SHAP-Derived Recommendations (P5.4)
+    recommendations = generate_shap_recommendations(pred_label, feature_contributions, input_dict)
 
-
-# ===========================
-# YOLOv8 Vehicle Detection & Count
-# Modelled after: github.com/RayanAIX/vehicle-detection-and-counting-yolov8
-# ===========================
-
-# Vehicle class IDs in COCO (used by YOLOv8n)
-VEHICLE_CLASSES = {
-    1:  {'label': 'Bicycle',    'color': (234, 179, 8)},
-    2:  {'label': 'Car',        'color': (23, 178, 106)},
-    3:  {'label': 'Motorcycle', 'color': (240, 68, 56)},
-    5:  {'label': 'Bus',        'color': (45, 124, 255)},
-    7:  {'label': 'Truck',      'color': (247, 144, 9)},
-}
-
-# Cache loaded model
-_yolo_model = None
-
-def get_yolo_model():
-    global _yolo_model
-    if _yolo_model is None:
-        try:
-            from ultralytics import YOLO
-            candidates = [
-                os.path.join(BASE_DIR, "yolov8s.pt"),
-                os.path.join(BASE_DIR, "..", "yolov8s.pt"),
-                os.path.join(BASE_DIR, "yolov8m.pt"),
-                os.path.join(BASE_DIR, "..", "yolov8m.pt"),
-                os.path.join(BASE_DIR, "yolov8n.pt"),
-                os.path.join(BASE_DIR, "..", "yolov8n.pt"),
-                "yolov8s.pt",
-                "yolov8n.pt"
-            ]
-            model_path = None
-            for p in candidates:
-                if os.path.isfile(p):
-                    model_path = p
-                    break
-            if not model_path:
-                model_path = "yolov8s.pt"
-            _yolo_model = YOLO(model_path)
-            print(f"YOLO model loaded successfully from: {model_path}")
-        except Exception as e:
-            print(f"YOLO load error: {e}")
-    return _yolo_model
-
-# Store output files (videos / images) for download
-_yolo_output_files = {}
-
-
-@app.route("/api/yolo/detect", methods=["POST"])
-def yolo_detect():
-    """
-    Enhanced Vehicle Detection and Tracking endpoint.
-    - Uses ByteTrack persistent multi-object tracking to count unique vehicles across video.
-    - Whitelists only road vehicles: Car (2), Truck (7), Bus (5), Motorcycle (3), Bicycle (1).
-    - Prevents false train / non-vehicle detections.
-    - Encodes annotated video using H.264 for universal web/browser/editor playback.
-    """
-    import cv2
-    import subprocess
-    from collections import defaultdict, Counter
-
-    model = get_yolo_model()
-    if model is None:
-        return jsonify({"success": False, "error": "YOLO model not available"}), 500
-
-    if 'video' not in request.files:
-        return jsonify({"success": False, "error": "No file provided"}), 400
-
-    video_file = request.files['video']
-    if not video_file.filename:
-        return jsonify({"success": False, "error": "Empty filename"}), 400
-
-    # Confidence threshold (clamped between 0.20 and 0.95 for stability)
+    # Log to predictions table for history/audit (P5.9)
     try:
-        conf_threshold = float(request.form.get('conf', 0.35))
-        conf_threshold = max(0.20, min(0.95, conf_threshold))
-    except Exception:
-        conf_threshold = 0.35
-
-    # Strict whitelist of road vehicles (COCO classes):
-    # 1: Bicycle, 2: Car, 3: Motorcycle, 5: Bus, 7: Truck
-    VEHICLE_IDS_LIST = [1, 2, 3, 5, 7]
-    CLASS_LABELS = {1: 'Bicycle', 2: 'Car', 3: 'Motorcycle', 5: 'Bus', 7: 'Truck'}
-
-    raw_ext = os.path.splitext(video_file.filename)[1] or '.mp4'
-    with tempfile.NamedTemporaryFile(delete=False, suffix=raw_ext) as tmp:
-        video_file.save(tmp.name)
-        tmp_path = tmp.name
-
-    raw_output_path = None
-    output_path = None
-
-    try:
-        image_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tiff', '.tif'}
-        is_image = raw_ext.lower() in image_exts
-
-        frame_img = None
-        if is_image:
-            frame_img = cv2.imread(tmp_path)
-            if frame_img is None:
-                return jsonify({"success": False, "error": "Cannot read uploaded image"}), 400
-            frames_list = [frame_img]
-            fps = 25.0
-            total_frames = 1
-            h, w = frame_img.shape[:2]
-        else:
-            cap = cv2.VideoCapture(tmp_path)
-            if not cap.isOpened():
-                frame_img = cv2.imread(tmp_path)
-                if frame_img is not None:
-                    is_image = True
-                    frames_list = [frame_img]
-                    fps = 25.0
-                    total_frames = 1
-                    h, w = frame_img.shape[:2]
-                else:
-                    return jsonify({"success": False, "error": "Cannot open video file"}), 400
-            else:
-                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                if total_frames <= 0:
-                    total_frames = 1
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                if not fps or fps <= 0 or np.isnan(fps) or fps > 120:
-                    fps = 25.0
-
-                # Sample up to 300 frames smoothly
-                max_samples = min(300, total_frames) if total_frames > 1 else 300
-                step = max(1, total_frames // max_samples) if total_frames > 1 else 1
-
-                frames_list = []
-                frame_idx = 0
-                while len(frames_list) < max_samples:
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
-                    if frame_idx % step == 0:
-                        frames_list.append(frame)
-                    frame_idx += 1
-                cap.release()
-
-                if not frames_list:
-                    frame_img = cv2.imread(tmp_path)
-                    if frame_img is not None:
-                        is_image = True
-                        frames_list = [frame_img]
-                        fps = 25.0
-                        total_frames = 1
-                        h, w = frame_img.shape[:2]
-                    else:
-                        return jsonify({"success": False, "error": "No readable video frames found"}), 400
-                else:
-                    h, w = frames_list[0].shape[:2]
-
-        # Prepare temporary writer
-        out_writer = None
-        if not is_image:
-            with tempfile.NamedTemporaryFile(delete=False, suffix='_raw.mp4') as out_tmp:
-                raw_output_path = out_tmp.name
-            try:
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                out_writer = cv2.VideoWriter(raw_output_path, fourcc, fps, (w, h))
-            except Exception as e:
-                print(f"VideoWriter warning: {e}")
-                out_writer = None
-        else:
-            with tempfile.NamedTemporaryFile(delete=False, suffix='_annotated.jpg') as out_tmp:
-                output_path = out_tmp.name
-
-        frame_results = []
-        best_annotated = None
-        best_count = -1
-        emergency_detected = False
-        track_history = defaultdict(list)
-
-        for frame in frames_list:
-            if is_image:
-                # Single-frame inference with strict class filtering
-                results = model(
-                    frame,
-                    classes=VEHICLE_IDS_LIST,
-                    conf=conf_threshold,
-                    verbose=False
-                )
-            else:
-                # ByteTrack multi-object tracking with strict class filtering
-                results = model.track(
-                    frame,
-                    persist=True,
-                    tracker="bytetrack.yaml",
-                    classes=VEHICLE_IDS_LIST,
-                    conf=conf_threshold,
-                    verbose=False
-                )
-
-            # Visual annotations with bounding boxes and labels
-            annotated_frame = results[0].plot(line_width=2)
-
-            boxes = results[0].boxes
-            current_frame_count = 0
-
-            if boxes is not None and len(boxes) > 0:
-                for box in boxes:
-                    cls_id = int(box.cls[0])
-                    if cls_id not in CLASS_LABELS:
-                        continue
-                    current_frame_count += 1
-                    conf = float(box.conf[0])
-                    x1, y1, x2, y2 = box.xyxy[0].tolist()
-                    box_area = (x2 - x1) * (y2 - y1)
-
-                    tid = int(box.id[0]) if (box.id is not None) else None
-                    if tid is not None:
-                        track_history[tid].append((cls_id, conf, box_area))
-
-                    # Emergency/heavy vehicle flag (bus or large truck)
-                    if cls_id in (5, 7) and box_area > (0.035 * w * h):
-                        emergency_detected = True
-
-            frame_results.append(current_frame_count)
-
-            # Modern HUD overlay banner on frame
-            unique_count_now = len(track_history) if not is_image else current_frame_count
-            hud_text = f"Vehicles in Frame: {current_frame_count}  |  Unique Tracked: {unique_count_now}"
-            (tw, th), _ = cv2.getTextSize(hud_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
-            cv2.rectangle(annotated_frame, (16, 16), (tw + 36, th + 34), (15, 23, 42), -1)
-            cv2.rectangle(annotated_frame, (16, 16), (tw + 36, th + 34), (23, 178, 106), 2)
-            cv2.putText(annotated_frame, hud_text, (26, th + 24),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
-
-            if out_writer is not None:
-                out_writer.write(annotated_frame)
-
-            if current_frame_count > best_count or best_annotated is None:
-                best_count = current_frame_count
-                best_annotated = annotated_frame.copy()
-
-        if out_writer is not None:
-            out_writer.release()
-
-        # For images, write out directly
-        if is_image and best_annotated is not None and output_path:
-            cv2.imwrite(output_path, best_annotated)
-
-        # For videos: transcode to standard web H.264 MP4 using imageio_ffmpeg
-        if not is_image and raw_output_path and os.path.exists(raw_output_path):
-            with tempfile.NamedTemporaryFile(delete=False, suffix='_h264.mp4') as out_tmp:
-                output_path = out_tmp.name
-            try:
-                import imageio_ffmpeg
-                ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-                cmd = [
-                    ffmpeg_exe, '-y',
-                    '-i', raw_output_path,
-                    '-c:v', 'libx264',
-                    '-pix_fmt', 'yuv420p',
-                    '-preset', 'fast',
-                    '-crf', '22',
-                    output_path
-                ]
-                subprocess.run(cmd, capture_output=True, check=True)
-            except Exception as e:
-                print(f"H.264 transcode warning: {e}, using raw output")
-                output_path = raw_output_path
-                raw_output_path = None
-
-        # Base64 encode preview frame for UI
-        annotated_b64 = ""
-        if best_annotated is not None:
-            _, buf = cv2.imencode('.jpg', best_annotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
-            annotated_b64 = base64.b64encode(buf.tobytes()).decode('utf-8')
-
-        # Register output file for download
-        import uuid
-        dl_token = uuid.uuid4().hex
-        download_filename = "annotated_traffic.jpg" if is_image else "vehicle_detection_output.mp4"
-        download_mimetype = "image/jpeg" if is_image else "video/mp4"
-
-        _yolo_output_files[dl_token] = {
-            "path": output_path,
-            "filename": download_filename,
-            "mimetype": download_mimetype
-        }
-        output_path_to_keep = output_path
-        output_path = None  # Prevent deletion in finally block
-
-        # Calculate accurate vehicle counts
-        agg_counts = {v: 0 for v in CLASS_LABELS.values()}
-
-        if is_image:
-            # For image, count from the single detection frame
-            if results and results[0].boxes is not None:
-                for b in results[0].boxes:
-                    c_id = int(b.cls[0])
-                    if c_id in CLASS_LABELS:
-                        agg_counts[CLASS_LABELS[c_id]] += 1
-            total = sum(agg_counts.values())
-        else:
-            # For video: summarize unique tracked vehicles using temporal majority vote
-            if track_history:
-                for tid, records in track_history.items():
-                    dom_cls = Counter([r[0] for r in records]).most_common(1)[0][0]
-                    lbl = CLASS_LABELS.get(dom_cls, 'Car')
-                    agg_counts[lbl] += 1
-                total = len(track_history)
-            else:
-                total = best_count if best_count > 0 else 0
-
-        avg_per_frame = (sum(frame_results) / len(frame_results)) if frame_results else 0
-        density = "High" if avg_per_frame >= 8 else ("Medium" if avg_per_frame >= 4 else "Low")
-
-        return jsonify({
-            "success": True,
-            "annotated_frame": annotated_b64,
-            "counts": {k: v for k, v in agg_counts.items() if v > 0},
-            "all_counts": agg_counts,
-            "total": total,
-            "peak_vehicles": best_count if best_count >= 0 else 0,
-            "avg_vehicles": round(avg_per_frame, 1),
-            "total_frames_sampled": len(frames_list),
-            "video_total_frames": total_frames,
-            "emergency_detected": emergency_detected,
-            "density": density,
-            "is_image": is_image,
-            "download_filename": download_filename,
-            "frame_results": frame_results,
-            "frame_labels": [f"Frame {i+1}" for i in range(len(frame_results))],
-            "download_token": dl_token,
-            "conf_used": conf_threshold
-        })
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"success": False, "error": str(e)}), 500
-
-    finally:
-        for p in [tmp_path, raw_output_path]:
-            if p and os.path.exists(p):
-                try:
-                    os.unlink(p)
-                except Exception:
-                    pass
-        if output_path and os.path.exists(output_path):
-            try:
-                os.unlink(output_path)
-            except Exception:
-                pass
-
-
-@app.route("/api/yolo/download/<token>", methods=["GET"])
-def yolo_download(token):
-    """Download the annotated output (mirrors reference repo output)."""
-    file_info = _yolo_output_files.get(token)
-    if not file_info:
-        return jsonify({"error": "File not found or expired"}), 404
-    filepath = file_info["path"]
-    if not os.path.exists(filepath):
-        return jsonify({"error": "File no longer on server"}), 404
-    try:
-        return send_from_directory(
-            os.path.dirname(filepath),
-            os.path.basename(filepath),
-            as_attachment=True,
-            download_name=file_info["filename"],
-            mimetype=file_info["mimetype"]
+        conn = get_db()
+        c = conn.cursor()
+        c.execute(
+            """
+            INSERT INTO predictions 
+            (timestamp, user, input_data, predicted_severity, probability, all_probabilities, expected_severity_score, top_factors)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                session.get('username', 'anonymous'),
+                json.dumps(input_dict),
+                pred_label,
+                round(pred_prob, 4),
+                json.dumps({"minor": round(float(probs[0]), 4), "major": round(float(probs[1]), 4), "fatal": round(float(probs[2]), 4)}),
+                expected_severity_score,
+                json.dumps([f"{f['original_feature']}={f['value']}" for f in top_7_features[:3]])
+            )
         )
-    finally:
-        try:
-            os.unlink(filepath)
-            del _yolo_output_files[token]
-        except Exception:
-            pass
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Failed to log prediction: {e}")
 
+    return jsonify({
+        "success": True,
+        "predicted_severity": pred_label,
+        "predicted_severity_title": pred_label.title(),
+        "probability": round(pred_prob, 4),
+        "confidence": round(pred_prob * 100.0, 2),
+        "class_probabilities": {
+            "minor": round(float(probs[0]), 4),
+            "major": round(float(probs[1]), 4),
+            "fatal": round(float(probs[2]), 4)
+        },
+        "expected_severity_score": expected_severity_score,
+        "shap_features": top_7_features,
+        "top_factors": top_7_features,
+        "recommendations": recommendations,
+        "model_policy": "Post-Incident Incident Scenario Severity Classification",
+        "disclaimer": "SHAP reflects statistical feature attributions within the trained model, not absolute physical causation."
+    })
 
 # ===========================
-# Run Flask
+# Records CRUD & Import/Export (P6.4)
 # ===========================
+@app.route("/api/records")
+@login_required
+def get_records():
+    page = max(int(request.args.get('page', 1)), 1)
+    page_size = min(int(request.args.get('page_size', 20)), 100)
+    offset = (page - 1) * page_size
+    search = request.args.get('search', '').strip()
+
+    where_clauses = []
+    params = []
+
+    if search:
+        where_clauses.append("(accident_uid LIKE ? OR road_name LIKE ? OR area LIKE ? OR cause LIKE ? OR CAST(id AS TEXT) = ?)")
+        term = f"%{search}%"
+        params.extend([term, term, term, term, search])
+
+    base_where, base_params = build_accident_filter(request.args)
+    if base_where:
+        where_clauses.append(base_where.replace("WHERE ", ""))
+        params.extend(base_params)
+
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+    conn = get_db()
+    c = conn.cursor()
+    total = c.execute(f"SELECT COUNT(*) FROM accidents {where_sql}", params).fetchone()[0]
+
+    query = f"""
+        SELECT id, accident_uid, occurred_at, year, area, road_name, road_type,
+               lanes, traffic_signal, weather, visibility, traffic_density,
+               cause, severity, vehicles_involved, casualties, data_source
+        FROM accidents
+        {where_sql}
+        ORDER BY occurred_at DESC
+        LIMIT ? OFFSET ?
+    """
+    records = [dict(r) for r in c.execute(query, params + [page_size, offset]).fetchall()]
+    conn.close()
+
+    return jsonify({
+        "success": True,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": int(np.ceil(total / max(page_size, 1))),
+        "records": records
+    })
+
+@app.route("/api/records", methods=["POST"])
+@login_required
+@role_required(['admin'])
+def create_record():
+    data = request.get_json(silent=True) or {}
+    meta = ml_artifacts.get("metadata") or {}
+
+    area = data.get("area", "").strip()
+    road_name = data.get("road_name", "").strip()
+    severity = data.get("severity", "").strip().lower()
+    cause = data.get("cause", "").strip().lower()
+
+    if not area or not road_name or severity not in ['minor', 'major', 'fatal']:
+        return jsonify({"success": False, "error": "Valid area, road_name, and severity are required."}), 400
+
+    now = datetime.datetime.now()
+    occurred_at = data.get("occurred_at", now.strftime("%Y-%m-%d %H:%M"))
+    year = int(occurred_at[:4])
+    month = int(occurred_at[5:7]) if len(occurred_at) >= 7 else now.month
+    hour = int(data.get("hour", now.hour))
+    day_of_week = data.get("day_of_week", "Monday")
+    lanes = int(data.get("lanes", 2))
+    traffic_signal = int(data.get("traffic_signal", 0))
+    lat = float(data.get("latitude", 9.9656))
+    lon = float(data.get("longitude", 76.3204))
+    weather = data.get("weather", "clear")
+    visibility = data.get("visibility", "high")
+    temp = float(data.get("temperature", 28.0))
+    density = data.get("traffic_density", "medium")
+    vehicles = int(data.get("vehicles_involved", 1))
+    casualties = int(data.get("casualties", 0))
+
+    accident_uid = f"REC-{year}-{uuid.uuid4().hex[:6].upper()}"
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute(
+        """
+        INSERT INTO accidents 
+        (accident_uid, occurred_at, year, month, hour, day_of_week, is_weekend,
+         area, road_name, road_type, lanes, traffic_signal, latitude, longitude,
+         weather, visibility, temperature, traffic_density, cause, severity,
+         vehicles_involved, casualties, data_source, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            accident_uid, occurred_at, year, month, hour, day_of_week, 1 if day_of_week in ["Saturday", "Sunday"] else 0,
+            area, road_name, data.get("road_type", "urban"), lanes, traffic_signal, lat, lon,
+            weather, visibility, temp, density, cause, severity,
+            vehicles, casualties, "sample",
+            now.strftime("%Y-%m-%d %H:%M:%S"), now.strftime("%Y-%m-%d %H:%M:%S")
+        )
+    )
+    new_id = c.lastrowid
+    # Audit Log
+    c.execute(
+        "INSERT INTO audit_log (user, action, record_id, timestamp, details) VALUES (?, ?, ?, ?, ?)",
+        (session['username'], "CREATE_RECORD", accident_uid, now.strftime("%Y-%m-%d %H:%M:%S"), f"Created accident {accident_uid}")
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify({"success": True, "message": "Record created successfully.", "id": new_id, "accident_uid": accident_uid})
+
+@app.route("/api/records/<int:rec_id>", methods=["PUT"])
+@login_required
+@role_required(['admin'])
+def update_record(rec_id):
+    data = request.get_json(silent=True) or {}
+    severity = data.get("severity", "").strip().lower()
+    cause = data.get("cause", "").strip().lower()
+
+    if severity not in ['minor', 'major', 'fatal']:
+        return jsonify({"success": False, "error": "Valid severity ('minor', 'major', 'fatal') required."}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    c.execute(
+        """
+        UPDATE accidents
+        SET severity = ?, cause = ?, casualties = ?, vehicles_involved = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (severity, cause, int(data.get("casualties", 0)), int(data.get("vehicles_involved", 1)), now_str, rec_id)
+    )
+    if c.rowcount == 0:
+        conn.close()
+        return jsonify({"success": False, "error": "Record not found."}), 404
+
+    c.execute(
+        "INSERT INTO audit_log (user, action, record_id, timestamp, details) VALUES (?, ?, ?, ?, ?)",
+        (session['username'], "UPDATE_RECORD", str(rec_id), now_str, f"Updated severity to {severity}")
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify({"success": True, "message": "Record updated successfully."})
+
+@app.route("/api/records/<int:rec_id>", methods=["DELETE"])
+@login_required
+@role_required(['admin'])
+def delete_record(rec_id):
+    conn = get_db()
+    c = conn.cursor()
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    c.execute("DELETE FROM accidents WHERE id = ?", (rec_id,))
+    if c.rowcount == 0:
+        conn.close()
+        return jsonify({"success": False, "error": "Record not found."}), 404
+
+    c.execute(
+        "INSERT INTO audit_log (user, action, record_id, timestamp, details) VALUES (?, ?, ?, ?, ?)",
+        (session['username'], "DELETE_RECORD", str(rec_id), now_str, "Deleted record")
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify({"success": True, "message": "Record deleted successfully."})
+
+@app.route("/api/records/export")
+@login_required
+def export_records_csv():
+    conn = get_db()
+    csv_content = stream_csv_export(conn, request.args)
+    conn.close()
+    return send_file(
+        io.BytesIO(csv_content.encode('utf-8')),
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name=f"kochi_accidents_export_{int(time.time())}.csv"
+    )
+
+# ===========================
+# Live Reports Generation (P6.6)
+# ===========================
+@app.route("/api/reports/generate", methods=["POST", "GET"])
+@login_required
+def generate_report():
+    data = request.get_json(silent=True) or request.args
+    fmt = data.get("format", "pdf").lower()
+    area = data.get("area", "")
+    year = data.get("year", "")
+
+    conn = get_db()
+    if fmt == "pdf":
+        pdf_bytes = generate_pdf_report(conn, area_filter=area, year_filter=year)
+        conn.close()
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=f"Kochi_Road_Safety_Audit_{int(time.time())}.pdf"
+        )
+    else:
+        csv_str = stream_csv_export(conn, {"area": area, "year": year})
+        conn.close()
+        return send_file(
+            io.BytesIO(csv_str.encode('utf-8')),
+            mimetype="text/csv",
+            as_attachment=True,
+            download_name=f"Kochi_Road_Safety_Audit_{int(time.time())}.csv"
+        )
+
+# ===========================
+# Signal Optimization (P7.1)
+# ===========================
+@app.route("/api/signal/optimize", methods=["POST"])
+@login_required
+def run_signal_optimization():
+    data = request.get_json(silent=True) or {}
+    approaches = data.get("approaches", [])
+
+    if not approaches or len(approaches) < 2:
+        return jsonify({"success": False, "error": "At least 2 junction approaches required for optimization."}), 400
+
+    try:
+        min_cycle = int(data.get("min_cycle", 40))
+        max_cycle = int(data.get("max_cycle", 130))
+        fixed_baseline = data.get("fixed_baseline")
+
+        result = optimize_traffic_signals(
+            approaches=approaches,
+            min_cycle=min_cycle,
+            max_cycle=max_cycle,
+            fixed_baseline=fixed_baseline
+        )
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Signal optimization error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 400
+
+# ===========================
+# Emergency Vehicle Priority (P9.3, P9.4)
+# ===========================
+@app.route("/api/signal/emergency", methods=["POST"])
+@login_required
+def trigger_emergency_preemption():
+    data = request.get_json(silent=True) or {}
+    approach = data.get("approach", "North")
+    eta_sec = int(data.get("eta_seconds", 25))
+    vehicle_type = data.get("vehicle_type", "Ambulance")
+    current_phase = data.get("current_active_phase", "East")
+    elapsed_green = int(data.get("elapsed_green_seconds", 12))
+
+    plan = compute_emergency_preemption(
+        approaching_approach=approach,
+        eta_seconds=eta_sec,
+        vehicle_type=vehicle_type,
+        current_active_phase=current_phase,
+        elapsed_green_seconds=elapsed_green
+    )
+
+    # Persist in emergency_events log
+    log_emergency_event(plan)
+
+    return jsonify(plan)
+
+@app.route("/api/emergency/events")
+@login_required
+def get_emergency_events():
+    conn = get_db()
+    c = conn.cursor()
+    query = """
+        SELECT id, timestamp, vehicle_type, approach, eta_seconds, decision, preemption_plan, source, status
+        FROM emergency_events
+        ORDER BY id DESC
+        LIMIT 20
+    """
+    rows = [dict(r) for r in c.execute(query).fetchall()]
+    conn.close()
+    return jsonify({"success": True, "events": rows})
+
+# ===========================
+# Async YOLO Vehicle Detection (Phase 8)
+# ===========================
+@app.route("/api/yolo/detect", methods=["POST"])
+@login_required
+def yolo_detect_async():
+    if 'video' not in request.files and 'image' not in request.files and 'file' not in request.files:
+        return jsonify({"success": False, "error": "No media file uploaded."}), 400
+
+    upload = request.files.get('video') or request.files.get('image') or request.files.get('file')
+    if not upload or upload.filename == '':
+        return jsonify({"success": False, "error": "Empty filename."}), 400
+
+    filename = secure_filename(upload.filename)
+    ext = Path(filename).suffix.lower()
+    allowed_exts = {'.mp4', '.avi', '.mov', '.mkv', '.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+
+    if ext not in allowed_exts:
+        return jsonify({"success": False, "error": f"File type '{ext}' not supported. Allowed: {list(allowed_exts)}"}), 400
+
+    is_image = ext in {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+    conf_thresh = float(request.form.get('confidence', 0.25))
+    weights_choice = request.form.get('weights', 'yolov8s')
+    line_pos = float(request.form.get('line_position', 0.58))
+
+    job_id = f"job_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+    jobs_dir = Path(Config.JOBS_DIR)
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    temp_upload_path = jobs_dir / f"temp_{job_id}{ext}"
+    upload.save(str(temp_upload_path))
+
+    # Spawn background thread for asynchronous processing
+    thread = threading.Thread(
+        target=process_detection_job,
+        kwargs={
+            "job_id": job_id,
+            "input_path": str(temp_upload_path),
+            "is_image": is_image,
+            "conf_thresh": conf_thresh,
+            "weights_choice": weights_choice,
+            "line_pos_ratio": line_pos
+        },
+        daemon=True
+    )
+    thread.start()
+
+    return jsonify({
+        "success": True,
+        "job_id": job_id,
+        "message": "Detection job queued successfully.",
+        "status_url": f"/api/yolo/status/{job_id}",
+        "result_url": f"/api/yolo/result/{job_id}"
+    })
+
+@app.route("/api/yolo/status/<job_id>")
+@login_required
+def yolo_job_status(job_id):
+    meta = read_job_meta(job_id)
+    if not meta:
+        return jsonify({"success": False, "error": "Job not found or expired."}), 404
+    return jsonify({
+        "success": True,
+        "job_id": job_id,
+        "state": meta.get("state"),
+        "progress": meta.get("progress", 0),
+        "frames_done": meta.get("frames_done", 0),
+        "frames_total": meta.get("frames_total", 1),
+        "eta_seconds": meta.get("eta_seconds", 0),
+        "error": meta.get("error")
+    })
+
+@app.route("/api/yolo/result/<job_id>")
+@login_required
+def yolo_job_result(job_id):
+    meta = read_job_meta(job_id)
+    if not meta:
+        return jsonify({"success": False, "error": "Job not found or expired."}), 404
+    if meta.get("state") != "COMPLETED":
+        return jsonify({"success": False, "state": meta.get("state"), "error": meta.get("error")}), 202
+
+    result = meta.get("result", {})
+    return jsonify({"success": True, **result})
+
+@app.route("/api/yolo/download/<job_id>")
+def yolo_job_download(job_id):
+    meta = read_job_meta(job_id)
+    if not meta or meta.get("state") != "COMPLETED":
+        return jsonify({"success": False, "error": "Output not available."}), 404
+
+    job_dir = Path(Config.JOBS_DIR) / job_id
+    res = meta.get("result", {})
+    filename = res.get("filename", "annotated_video.mp4")
+    file_path = job_dir / filename
+
+    if not file_path.exists():
+        return jsonify({"success": False, "error": "Output file not found on disk."}), 404
+
+    return send_file(
+        str(file_path),
+        mimetype=res.get("mimetype", "video/mp4"),
+        as_attachment=True,
+        download_name=filename
+    )
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(debug=False, use_reloader=False, host="0.0.0.0", port=port)
+    logger.info(f"Starting server on http://localhost:{port} (debug={Config.DEBUG})...")
+    app.run(host="0.0.0.0", port=port, debug=Config.DEBUG)

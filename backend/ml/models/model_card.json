@@ -1,0 +1,67 @@
+{
+  "model_name": "Kochi Accident Severity XGBoost Classifier",
+  "version": "2.0.0",
+  "task": "Multiclass Post-Incident Severity Classification (minor, major, fatal)",
+  "framework": "XGBoost + scikit-learn",
+  "training_date": "2026-10-20 15:01:11",
+  "seed": 42,
+  "runtime_seconds": 16.89,
+  "library_versions": {
+    "xgboost": "3.4.1",
+    "scikit_learn": "1.9.0",
+    "shap": "0.52.0",
+    "pandas": "3.0.5",
+    "numpy": "2.5.1"
+  },
+  "dataset": {
+    "city": "Kochi",
+    "state": "Kerala",
+    "total_rows_trained": 14964,
+    "data_source_distribution": {
+      "synthetic": 14964
+    },
+    "time_range": "2023-01-01 06:12 to 2026-10-20 22:03",
+    "split_strategy": "Chronological hold-out (Train: <=2025, Test: 2026)"
+  },
+  "feature_policy": {
+    "type": "Post-Incident Incident Scenario Severity Classification",
+    "categorical_features": [
+      "area",
+      "road_name",
+      "road_type",
+      "weather",
+      "visibility",
+      "traffic_density",
+      "cause",
+      "day_of_week"
+    ],
+    "numerical_features": [
+      "lanes",
+      "traffic_signal",
+      "hour",
+      "vehicles_involved"
+    ],
+    "leakage_guard": "Excluded casualties and risk_score from all training inputs",
+    "target": "severity"
+  },
+  "metrics": {
+    "test_accuracy": 0.4546,
+    "test_balanced_accuracy": 0.442,
+    "test_macro_f1": 0.4421,
+    "roc_auc_ovr": 0.6366,
+    "cv_5fold_macro_f1": "0.4441 +/- 0.0051",
+    "majority_baseline_accuracy": 0.3711,
+    "majority_baseline_macro_f1": 0.1804,
+    "per_class_recall": {
+      "minor": 0.4964,
+      "major": 0.554,
+      "fatal": 0.2757
+    }
+  },
+  "limitations_and_ethics": [
+    "Trained on synthetic Kochi accident data generated from real junction geometry and probabilistic models.",
+    "Not validated on physical traffic crashes; do not use for automated emergency dispatch without real verified data.",
+    "SHAP explanations indicate model feature attribution, NOT clinical or legal physical causation.",
+    "Predicted probabilities reflect model confidence over trained distributions, not real-world risk frequency."
+  ]
+}

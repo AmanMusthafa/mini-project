@@ -1,25 +1,56 @@
+# Environment and Secrets
+.env
+.env.*
+!.env.example
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+
 # Virtual Environments
 .venv/
 venv/
 env/
 ENV/
 
-# Python Cache
-__pycache__/
-*.py[cod]
-*$py.class
-*.pyd
+# Temporary directories & Uploads
+_archive/
+uploads/
+tmp/
+*.tmp
 
-# Large files (>100MB rejected by GitHub)
-traffic_highway.mp4
+# Media & Videos (except docs/demo/)
+*.mp4
+!docs/demo/*.mp4
+*.avi
+*.mov
+*.mkv
+
+# Junk screenshots & debug crops
+crop_*.png
+crop_*.jpg
+f*.jpg
+slider_full.png
+
+# Large datasets (keep only small sample data)
+backend/data/*.csv
+!backend/data/sample_accidents.csv
+
+# Large models (>50MB)
 backend/ml/models/accident_severity_model.pkl
 backend/ml/models/risk_model.pkl
-*.mp4.tmp
-temp_*.mp4
+*.pt
 
-# Logs & IDE
+# Logs & IDEs
 *.log
 .vscode/
 .idea/
 .gemini/
-
+.pytest_cache/
