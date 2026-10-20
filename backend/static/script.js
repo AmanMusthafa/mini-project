@@ -207,9 +207,12 @@ function navigateTo(pageId){
   document.getElementById('topbar-title-text').textContent = meta.title;
   document.getElementById('topbar-title-sub').innerHTML   = meta.sub;
   document.getElementById('sidebar').classList.remove('mobile-open');
-  document.getElementById('sidebar-overlay').classList.remove('active');
-  requestAnimationFrame(()=>initPageContent(pageId));
-}
+  requestAnimationFrame(()=>{
+    initPageContent(pageId);
+    if(pageId === 'hotspot' && typeof hotspotMapInstance !== 'undefined' && hotspotMapInstance){
+      setTimeout(() => hotspotMapInstance.invalidateSize(), 200);
+    }
+  });
 
 document.querySelectorAll('.nav-item[data-page]').forEach(item=>{
   item.addEventListener('click', ()=>navigateTo(item.dataset.page));
@@ -1263,11 +1266,28 @@ async function runRiskPrediction(){
     const cause = document.getElementById('risk-cause')?.value || 'overspeeding';
     const vehiclesInvolved = Number(document.getElementById('risk-vehicles')?.value || 2);
 
+    let dayOfWeek = 'Friday';
+    if(dateValue){
+      try {
+        const d = new Date(dateValue);
+        const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+        if(!isNaN(d.getDay())) dayOfWeek = days[d.getDay()];
+      } catch(e){}
+    }
+
+    let hour = 18;
+    if(timeValue){
+      const parsedH = parseInt(timeValue.split(':')[0], 10);
+      if(!isNaN(parsedH)) hour = parsedH;
+    }
+
     const predictionData = {
       area: area,
       road_name: roadName,
       date: dateValue,
       time: timeValue,
+      day_of_week: dayOfWeek,
+      hour: hour,
       road_type: roadType,
       lanes: lanes,
       traffic_density: trafficDensity,
@@ -1439,7 +1459,14 @@ function initHotspotPage(){
 }
 
 function buildHotspotMap(){
-  if(hotspotMapInstance || !window.L) return;
+  if(hotspotMapInstance) {
+    setTimeout(() => hotspotMapInstance.invalidateSize(), 150);
+    return;
+  }
+  if(!window.L) {
+    setTimeout(buildHotspotMap, 250);
+    return;
+  }
   const el = document.getElementById('hotspot-map');
   if(!el) return;
 
@@ -1474,16 +1501,25 @@ async function loadHotspotsFromAPI(filters = {}){
 
     const data = await res.json();
     currentHotspots = data.hotspots || [];
-    topDangerHotspot = data.stats?.top_danger_zone || currentHotspots[0] || null;
+    const stats = data.stats || {
+      total_hotspots: currentHotspots.length,
+      total_accidents: currentHotspots.reduce((acc, h) => acc + (h.total_accidents || 0), 0),
+      very_high_count: currentHotspots.filter(h => h.tier === 'Critical' || h.tier === 'veryhigh').length,
+      high_count: currentHotspots.filter(h => h.tier === 'High' || h.tier === 'high').length,
+      moderate_count: currentHotspots.filter(h => h.tier === 'Moderate' || h.tier === 'moderate').length,
+      low_count: currentHotspots.filter(h => h.tier === 'Low' || h.tier === 'low').length,
+      top_danger_zone: currentHotspots[0] || null
+    };
+    topDangerHotspot = stats.top_danger_zone || currentHotspots[0] || null;
 
     // Update Header Badges
     const headerDangerEl = document.getElementById('header-danger-count');
     if(headerDangerEl){
-      headerDangerEl.innerHTML = `<span class="dot-status live" style="background:#F04438;"></span>${data.stats.very_high_count} Critical Zones`;
+      headerDangerEl.innerHTML = `<span class="dot-status live" style="background:#F04438;"></span>${stats.very_high_count || 0} Critical Zones`;
     }
     const headerCountEl = document.getElementById('header-hotspot-count');
     if(headerCountEl){
-      headerCountEl.textContent = `${data.stats.total_hotspots} Monitored Hotspots`;
+      headerCountEl.textContent = `${stats.total_hotspots || 0} Monitored Hotspots`;
     }
 
     // Update Top Danger Zone Alert Banner
@@ -1493,15 +1529,15 @@ async function loadHotspotsFromAPI(filters = {}){
       const nameEl = document.getElementById('top-alert-name');
       const fatalEl = document.getElementById('top-alert-fatal');
       const descEl = document.getElementById('top-alert-desc');
-      if(nameEl) nameEl.textContent = topDangerHotspot.name;
-      if(fatalEl) fatalEl.textContent = `${topDangerHotspot.fatal_accidents} Fatal`;
-      if(descEl) descEl.textContent = `${topDangerHotspot.area} · Score: ${topDangerHotspot.danger_score}/100 · Primary Cause: ${topDangerHotspot.top_cause}`;
+      if(nameEl) nameEl.textContent = topDangerHotspot.name || topDangerHotspot.road_name;
+      if(fatalEl) fatalEl.textContent = `${topDangerHotspot.fatal_accidents || topDangerHotspot.fatal_count || 0} Fatal`;
+      if(descEl) descEl.textContent = `${topDangerHotspot.area} · Score: ${topDangerHotspot.danger_score}/100 · Primary Cause: ${topDangerHotspot.top_cause || topDangerHotspot.primary_cause}`;
     } else if(topAlertEl){
       topAlertEl.style.display = 'none';
     }
 
     // Render Stats
-    renderHotspotStats(data.stats);
+    renderHotspotStats(stats);
 
     // Apply tier filter to view
     renderFilteredHotspotView();
@@ -1552,12 +1588,16 @@ function renderHotspotStats(stats){
 
 function renderFilteredHotspotView(){
   let displayList = currentHotspots;
-  if(activeTierFilter === 'veryhigh'){
-    displayList = currentHotspots.filter(h => h.tier === 'veryhigh');
+  if(activeTierFilter === 'veryhigh' || activeTierFilter === 'Critical'){
+    displayList = currentHotspots.filter(h => h.tier === 'veryhigh' || h.tier === 'Critical' || h.tier_code === 'veryhigh');
   }
 
   renderHotspotMarkers(displayList);
   renderHotspotList(displayList);
+
+  if(hotspotMapInstance) {
+    setTimeout(() => hotspotMapInstance.invalidateSize(), 150);
+  }
 }
 
 function renderHotspotMarkers(hotspots){

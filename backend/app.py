@@ -95,10 +95,10 @@ def add_security_headers(response):
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
     response.headers['Content-Security-Policy'] = (
         "default-src 'self' 'unsafe-inline' https:; "
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
-        "font-src 'self' https://fonts.gstatic.com data:; "
-        "img-src 'self' data: blob: https:; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://unpkg.com; "
+        "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:; "
+        "img-src 'self' data: blob: https: *.tile.openstreetmap.org; "
         "connect-src 'self' https:;"
     )
     return response
@@ -747,23 +747,58 @@ def get_accident_hotspots():
         normalized_score = round(scores[i], 1)
         if normalized_score >= p90:
             tier = "Critical"
+            tier_code = "veryhigh"
+            color = "#F04438"
+            radius = 320
         elif normalized_score >= p70:
             tier = "High"
+            tier_code = "high"
+            color = "#F79009"
+            radius = 240
         elif normalized_score >= p40:
             tier = "Moderate"
+            tier_code = "moderate"
+            color = "#EAB308"
+            radius = 180
         else:
             tier = "Low"
+            tier_code = "low"
+            color = "#17B26A"
+            radius = 140
 
+        r['id'] = i + 1
+        r['name'] = r['road_name']
+        r['lat'] = r['latitude']
+        r['lng'] = r['longitude']
         r['danger_score'] = normalized_score
         r['tier'] = tier
+        r['tier_code'] = tier_code
+        r['danger_level'] = f"{tier} Danger Zone"
+        r['color'] = color
+        r['radius'] = radius
+        r['fatal_accidents'] = r['fatal_count']
+        r['major_accidents'] = r['major_count']
+        r['minor_accidents'] = r['minor_count']
+        r['top_cause'] = r.get('primary_cause', 'overspeeding')
         hotspots.append(r)
 
     # Sort by danger score descending
     hotspots.sort(key=lambda x: x['danger_score'], reverse=True)
 
+    stats = {
+        "total_hotspots": len(hotspots),
+        "total_accidents": sum(h['total_accidents'] for h in hotspots),
+        "very_high_count": sum(1 for h in hotspots if h['tier'] == 'Critical'),
+        "high_count": sum(1 for h in hotspots if h['tier'] == 'High'),
+        "moderate_count": sum(1 for h in hotspots if h['tier'] == 'Moderate'),
+        "low_count": sum(1 for h in hotspots if h['tier'] == 'Low'),
+        "top_danger_zone": hotspots[0] if hotspots else None
+    }
+
     return jsonify({
         "success": True,
         "total_hotspots": len(hotspots),
+        "stats": stats,
         "hotspots": hotspots,
         "disclaimer": "Historical spatial concentration of recorded accidents. Not a physical prediction of future crashes."
     })
@@ -821,6 +856,17 @@ def predict_accident_severity():
     traffic_density = data.get("traffic_density", "").strip().lower()
     cause = data.get("cause", "").strip().lower()
     day_of_week = data.get("day_of_week", "").strip().title()
+    date_val = str(data.get("date", "")).strip()
+    if not day_of_week and date_val:
+        for fmt in ["%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%d/%m/%Y"]:
+            try:
+                dt = datetime.datetime.strptime(date_val, fmt)
+                day_of_week = dt.strftime("%A")
+                break
+            except ValueError:
+                pass
+    if not day_of_week:
+        day_of_week = datetime.datetime.now().strftime("%A")
 
     valid_areas = meta.get("areas", [])
     valid_area_roads = meta.get("area_roads", {})
@@ -853,7 +899,26 @@ def predict_accident_severity():
     try:
         lanes = int(data.get("lanes", 2))
         traffic_signal = int(data.get("traffic_signal", 0))
-        hour = int(data.get("hour", 12))
+
+        if "hour" in data and str(data["hour"]).strip():
+            hour = int(data["hour"])
+        else:
+            time_val = str(data.get("time", "")).strip()
+            hour = 12
+            if time_val:
+                for fmt in ["%H:%M", "%I:%M %p", "%I:%M%p"]:
+                    try:
+                        t_dt = datetime.datetime.strptime(time_val, fmt)
+                        hour = t_dt.hour
+                        break
+                    except ValueError:
+                        pass
+                if ":" in time_val and hour == 12:
+                    try:
+                        hour = int(time_val.split(":")[0])
+                    except Exception:
+                        pass
+
         vehicles_involved = int(data.get("vehicles_involved", 1))
 
         if not (1 <= lanes <= 8):
