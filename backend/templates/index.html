@@ -9,8 +9,8 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=13">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=14">
   <script>
     (function () {
       try {
@@ -128,7 +128,7 @@
             <path
               d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" />
             <circle cx="12" cy="12" r="3.2" />
-          </svg><span>Risk Prediction</span></a>
+          </svg><span>Severity Prediction</span></a>
         <a class="nav-item" data-page="hotspot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M20 10c0 5.5-8 12-8 12s-8-6.5-8-12a8 8 0 0 1 16 0Z" />
@@ -199,12 +199,7 @@
         </div>
       </div>
       <div class="topbar-right">
-        <button class="icon-btn" id="notif-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-            <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-          </svg><span class="dot"></span></button>
-        <button class="icon-btn" id="theme-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        <button class="icon-btn" id="theme-btn" title="Toggle Theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" />
           </svg></button>
@@ -327,17 +322,15 @@
           </div>
           <div class="card kpi-card hoverable animate-slideUp delay-3">
             <div class="kpi-top">
-              <div class="kpi-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              <div class="kpi-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                   stroke-linecap="round" stroke-linejoin="round">
-                  <path
-                    d="M14 16H9m10 0h3v-3.15a1 1 0 0 0-.84-.99L16 11l-2.7-3.6a1 1 0 0 0-.8-.4H5.5a1 1 0 0 0-.9.57L3 11H1" />
-                  <path d="M14 16a2 2 0 1 0 4 0M5 16a2 2 0 1 0 4 0" />
-                  <path d="M3 11h11v5H3z" />
+                  <path d="M12 9v4M12 17h.01" />
+                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
                 </svg></div>
-              <div class="kpi-trend neutral">Moderate</div>
+              <div class="kpi-trend neutral" id="dash-fatality-trend">Calculated</div>
             </div>
-            <div class="kpi-value">68%</div>
-            <div class="kpi-label">Traffic Density</div>
+            <div class="kpi-value" id="dash-fatality-rate">0.0%</div>
+            <div class="kpi-label">Fatality Rate</div>
           </div>
           <div class="card kpi-card hoverable animate-slideUp delay-4">
             <div class="kpi-top">
@@ -359,9 +352,9 @@
             <div class="card-head">
               <div class="card-head-text">
                 <h3>Accident Hotspot Map</h3>
-                <div class="card-sub">Live density across Kochi areas</div>
+                <div class="card-sub">Top accident clusters across Kochi</div>
               </div>
-              <span class="badge b-blue"><span class="dot-status live"></span>Live</span>
+              <span class="badge b-blue">Top 10 Hotspots</span>
             </div>
             <div class="map-container" id="dash-map" style="height:340px;"></div>
           </div>
@@ -369,12 +362,11 @@
             <div class="card-head">
               <div class="card-head-text">
                 <h3>Accidents Trend</h3>
-                <div class="card-sub" id="trend-chart-sub">2022 vs 2023 vs 2024</div>
+                <div class="card-sub" id="trend-chart-sub">Monthly accidents by year · Kochi</div>
               </div>
             </div>
-            <div class="chart-box" id="trend-chart-box" style="height:220px; position:relative;"><canvas
-                id="chart-dash-trend" width="560" height="220"
-                style="display:block;max-width:100%;height:100%;"></canvas></div>
+            <div class="chart-box" id="trend-chart-box" style="height:260px; position:relative;"><canvas
+                id="chart-dash-trend" style="display:block;width:100%;height:100%;"></canvas></div>
             <div class="legend-row">
               <div class="legend-item"><span class="legend-swatch" style="background:#8BA7CC;"></span>2022</div>
               <div class="legend-item"><span class="legend-swatch" style="background:#2D7CFF;"></span>2023</div>
@@ -391,32 +383,23 @@
         </div>
 
         <div class="grid grid-12" style="align-items:stretch;">
-          <div class="card col-span-4 card-pad hoverable animate-slideUp delay-3">
+          <div class="card col-span-6 card-pad hoverable animate-slideUp delay-3">
             <div class="card-head">
               <div class="card-head-text">
-                <h3>Recent Accidents</h3>
-                <div class="card-sub">Last reported incidents</div>
+                <h3>Recent Collisions</h3>
+                <div class="card-sub">Latest 8 reported incidents in Kochi</div>
               </div>
             </div>
             <div id="dash-recent-accidents"></div>
           </div>
-          <div class="card col-span-4 card-pad hoverable animate-slideUp delay-4">
+          <div class="card col-span-6 card-pad hoverable animate-slideUp delay-4">
             <div class="card-head">
               <div class="card-head-text">
-                <h3>Emergency Alerts</h3>
-                <div class="card-sub">Priority dispatch feed</div>
+                <h3>Critical &amp; Fatal Collisions Feed</h3>
+                <div class="card-sub">High-severity alerts &amp; priority road safety warnings</div>
               </div>
             </div>
-            <div id="dash-emergency-alerts"></div>
-          </div>
-          <div class="card col-span-4 card-pad hoverable animate-slideUp delay-5">
-            <div class="card-head">
-              <div class="card-head-text">
-                <h3>Live Traffic Status</h3>
-                <div class="card-sub">Signal &amp; junction feed</div>
-              </div>
-            </div>
-            <div id="dash-traffic-status"></div>
+            <div id="dash-critical-feed"></div>
           </div>
         </div>
       </section>
@@ -426,16 +409,16 @@
         <div class="page-header animate-fadeIn">
           <div>
             <h1>Accident Analytics</h1>
-            <p>Detailed insights and statistical analysis of road accidents</p>
+            <p id="analytics-page-subtitle">Detailed insights and statistical analysis of road accidents across Kochi</p>
           </div>
           <div class="page-header-actions">
-            <button class="btn btn-secondary ripple-surface"
-              onclick="showToast('success','Export ready','accident_analytics.csv has been generated.')"><svg
+            <button class="btn btn-secondary ripple-surface" id="analytics-export-btn"
+              onclick="exportAnalyticsCSV()"><svg
                 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                 stroke-linejoin="round">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                 <path d="M7 10l5 5 5-5M12 15V3" />
-              </svg>Export CSV</button>
+              </svg>Export Filtered CSV</button>
           </div>
         </div>
 
@@ -449,10 +432,10 @@
                   <rect x="12.5" y="8" width="3" height="10" />
                   <rect x="18" y="5" width="3" height="13" />
                 </svg></div>
-              <div class="kpi-trend up">13.5%</div>
+              <div class="kpi-trend" id="analytics-trend-total">100%</div>
             </div>
-            <div class="kpi-value" data-count="1248">0</div>
-            <div class="kpi-label">Total Accidents</div>
+            <div class="kpi-value" id="analytics-kpi-total" data-count="0">0</div>
+            <div class="kpi-label" id="analytics-label-total">Total Accidents</div>
           </div>
           <div class="card kpi-card hoverable animate-slideUp delay-2">
             <div class="kpi-top">
@@ -461,10 +444,10 @@
                   <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
                   <path d="M12 9v4M12 17h.01" />
                 </svg></div>
-              <div class="kpi-trend up">8.3%</div>
+              <div class="kpi-trend up" id="analytics-trend-fatal">0% fatal</div>
             </div>
-            <div class="kpi-value" data-count="312">0</div>
-            <div class="kpi-label">Fatal Accidents</div>
+            <div class="kpi-value" id="analytics-kpi-fatal" data-count="0">0</div>
+            <div class="kpi-label" id="analytics-label-fatal">Fatal Accidents</div>
           </div>
           <div class="card kpi-card hoverable animate-slideUp delay-3">
             <div class="kpi-top">
@@ -474,10 +457,10 @@
                     d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 12 6.5 5.5 5.5 0 0 0 2 8.5C2 13 8 17 12 20c1.2-.9 2.5-1.8 3.7-2.9" />
                   <path d="m18 15 2 2 4-4" />
                 </svg></div>
-              <div class="kpi-trend up">10.7%</div>
+              <div class="kpi-trend" id="analytics-trend-casualties">Casualties</div>
             </div>
-            <div class="kpi-value" data-count="1026">0</div>
-            <div class="kpi-label">Injured</div>
+            <div class="kpi-value" id="analytics-kpi-casualties" data-count="0">0</div>
+            <div class="kpi-label" id="analytics-label-casualties">Total Casualties</div>
           </div>
           <div class="card kpi-card hoverable animate-slideUp delay-4">
             <div class="kpi-top">
@@ -486,10 +469,10 @@
                   <rect x="3" y="7" width="18" height="13" rx="2" />
                   <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                 </svg></div>
-              <div class="kpi-trend down">14.2%</div>
+              <div class="kpi-trend" id="analytics-trend-major">0% major</div>
             </div>
-            <div class="kpi-value" data-count="2532">0</div>
-            <div class="kpi-label">Property Damage (₹K)</div>
+            <div class="kpi-value" id="analytics-kpi-major" data-count="0">0</div>
+            <div class="kpi-label" id="analytics-label-major">Major Accidents</div>
           </div>
         </div>
 
@@ -497,14 +480,13 @@
           <div class="card-head">
             <div class="card-head-text">
               <h3>Filter Records</h3>
-              <div class="card-sub">Refine by year, severity and state from the 2022–2024 dataset</div>
+              <div class="card-sub" id="analytics-filter-subtitle">Refine by year, severity, and area across Kochi urban zones</div>
             </div>
           </div>
           <div class="grid grid-4" style="align-items:end; gap:14px;">
             <div class="form-group" style="margin:0;"><label>Year</label>
               <select class="form-control" id="filter-year">
                 <option value="">All Years</option>
-                <option value="2022">2022</option>
                 <option value="2023">2023</option>
                 <option value="2024">2024</option>
                 <option value="2025">2025</option>
@@ -531,16 +513,29 @@
                 <option value="Vyttila">Vyttila</option>
               </select>
             </div>
-            <button class="btn btn-primary ripple-surface" id="analytics-filter-btn">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                stroke-linejoin="round">
-                <path d="M22 3H2l8 9.5V19l4 2v-8.5z" />
-              </svg>Apply Filter
-            </button>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-primary ripple-surface" id="analytics-filter-btn" onclick="applyAnalyticsFilter()" style="flex:1;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                  stroke-linejoin="round">
+                  <path d="M22 3H2l8 9.5V19l4 2v-8.5z" />
+                </svg>Apply Filter
+              </button>
+              <button type="button" class="btn btn-secondary ripple-surface" id="analytics-reset-btn" onclick="resetAnalyticsFilter()">
+                Reset
+              </button>
+            </div>
+          </div>
+          <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.06); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <div id="analytics-active-chips" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+              <span class="badge b-blue" style="font-size:11px;">All Records</span>
+            </div>
+            <div id="analytics-filter-count" style="font-size:12px; font-weight:600; color:var(--text-dim);">
+              Showing all accidents
+            </div>
           </div>
         </div>
 
-        <div class="grid grid-12 mb-16" style="align-items:stretch;">
+        <div class="grid grid-12" style="align-items:stretch;">
           <div class="card col-span-7 card-pad hoverable animate-slideUp delay-3">
             <div class="card-head">
               <div class="card-head-text">
@@ -560,38 +555,14 @@
             <div class="chart-box" style="height:260px;"><canvas id="chart-analytics-weekday"></canvas></div>
           </div>
         </div>
-
-        <div class="card card-pad hoverable animate-slideUp delay-5">
-          <div class="card-head">
-            <div class="card-head-text">
-              <h3>Recent Accident Records</h3>
-              <div class="card-sub">Latest logged incidents across the network</div>
-            </div><span class="badge b-neutral" id="recent-records-badge">Recent Incidents</span>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Date &amp; Time</th>
-                  <th>Location</th>
-                  <th>Severity</th>
-                  <th>Vehicles</th>
-                  <th>Casualties</th>
-                  <th>Road Type</th>
-                </tr>
-              </thead>
-              <tbody id="analytics-table-body"></tbody>
-            </table>
-          </div>
-        </div>
       </section>
 
-      <!-- ========================= RISK PREDICTION ========================= -->
+      <!-- ========================= SEVERITY PREDICTION ========================= -->
       <section class="page" id="page-risk">
         <div class="page-header animate-fadeIn">
           <div>
-            <h1>Risk Prediction</h1>
-            <p>Predict accident risk for any location and time using Explainable AI</p>
+            <h1>Severity Prediction</h1>
+            <p>Machine learning crash severity estimation with TreeSHAP explainability</p>
           </div>
           <span class="badge b-purple"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
               stroke-linecap="round" stroke-linejoin="round">
@@ -627,7 +598,7 @@
 
     <div class="form-group">
       <label>Road Network / Junction</label>
-      <select class="form-control" id="risk-road-name">
+      <select class="form-control" id="risk-road-name" onchange="onRoadSelectionChanged()">
         <option value="Rajagiri Road" selected>Rajagiri Road</option>
         <option value="LuLu Mall Access Road">LuLu Mall Access Road</option>
         <option value="Konthuruthy Road">Konthuruthy Road</option>
@@ -772,7 +743,7 @@
             style="display:flex; flex-direction:column; align-items:center; justify-content:center;">
             <div class="card-head" style="width:100%;">
               <div class="card-head-text">
-                <h3>Risk Score</h3>
+                <h3>Severity Index (0–100)</h3>
               </div>
             </div>
             <div class="gauge-wrap">
@@ -783,11 +754,28 @@
               </svg>
               <div class="gauge-center">
                 <div class="gpct" id="risk-gauge-pct" style="color:var(--text-muted, #64748B);">—</div>
-                <div class="glabel badge" id="risk-gauge-label" style="background:rgba(100,116,139,0.15);color:#64748B;">Awaiting Input</div>
+                <div class="glabel badge" id="risk-gauge-label" style="background:rgba(100,116,139,0.15);color:#64748B;">Awaiting Prediction</div>
               </div>
             </div>
-            <p class="text-dim" style="font-size:12px; text-align:center; margin-top:16px; line-height:1.6;"
-              id="risk-gauge-desc">Select scenario parameters on the left and click 'Predict Severity' to evaluate model inference.</p>
+
+            <!-- Probability Bars -->
+            <div class="prob-bars-container" id="risk-prob-bars">
+              <div class="prob-bar-row">
+                <div class="prob-bar-labels"><span style="color:#17B26A;">P(Minor)</span><span id="prob-minor-val">—</span></div>
+                <div class="prob-bar-track"><div class="prob-bar-fill minor" id="prob-minor-bar" style="width:0%;"></div></div>
+              </div>
+              <div class="prob-bar-row">
+                <div class="prob-bar-labels"><span style="color:#F79009;">P(Major)</span><span id="prob-major-val">—</span></div>
+                <div class="prob-bar-track"><div class="prob-bar-fill major" id="prob-major-bar" style="width:0%;"></div></div>
+              </div>
+              <div class="prob-bar-row">
+                <div class="prob-bar-labels"><span style="color:#F04438;">P(Fatal)</span><span id="prob-fatal-val">—</span></div>
+                <div class="prob-bar-track"><div class="prob-bar-fill fatal" id="prob-fatal-bar" style="width:0%;"></div></div>
+              </div>
+            </div>
+
+            <p class="text-dim" style="font-size:11.5px; text-align:center; margin-top:14px; line-height:1.5;"
+              id="risk-gauge-desc">Select scenario parameters and click 'Predict Severity' to evaluate model inference.</p>
           </div>
 
           <div class="card col-span-5 card-pad hoverable animate-slideUp delay-3">
@@ -806,7 +794,7 @@
                 style="font-size:12.5px; font-weight:700;" id="risk-pred-time">—</span></div>
             <div class="flex justify-between items-center"
               style="padding:11px 0; border-bottom:1px solid var(--border);"><span class="text-dim"
-                style="font-size:12.5px; font-weight:600;">Model Confidence</span><span
+                style="font-size:12.5px; font-weight:600;">Predicted-Class Probability</span><span
                 style="font-size:12.5px; font-weight:700;" id="risk-confidence">—</span></div>
             <div class="flex justify-between items-center" style="padding:11px 0;"><span class="text-dim"
                 style="font-size:12.5px; font-weight:600;">Status</span><span class="badge b-blue" id="risk-status-badge">Ready for Input</span></div>
@@ -823,25 +811,30 @@
             <div class="card-head">
               <div class="card-head-text">
                 <h3>SHAP Explainability</h3>
-                <div class="card-sub">Feature contribution to the predicted risk score</div>
+                <div class="card-sub" id="shap-card-sub">Feature contribution to the predicted severity class</div>
               </div>
             </div>
-            <div class="chart-box" style="height:220px;position:relative;"><canvas id="chart-shap" width="560" height="220" style="display:block;"></canvas></div>
+            <div id="shap-auto-summary" style="font-size:12.5px;color:#c0e6fd;margin-bottom:10px;font-weight:600;min-height:18px;"></div>
+            <div class="chart-box" style="height:230px;position:relative;"><canvas id="chart-shap" width="560" height="230" style="display:block;"></canvas></div>
             <div class="legend-row">
-              <div class="legend-item"><span class="legend-swatch" style="background:#F04438;"></span>Increases Risk
+              <div class="legend-item"><span class="legend-swatch" style="background:#17B26A;"></span>Supports Predicted Class
               </div>
-              <div class="legend-item"><span class="legend-swatch" style="background:#2D7CFF;"></span>Decreases Risk
+              <div class="legend-item"><span class="legend-swatch" style="background:#F04438;"></span>Opposes Predicted Class
               </div>
             </div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:6px;">* SHAP shows how the model used each input, not what caused an accident.</div>
           </div>
           <div class="card col-span-5 card-pad hoverable animate-slideUp delay-5">
             <div class="card-head">
               <div class="card-head-text">
-                <h3>Historical Risk — This Location</h3>
-                <div class="card-sub">Last 6 predictions at selected junction</div>
+                <h3 id="hist-record-title">Historical Record — Junction Analysis</h3>
+                <div class="card-sub">Recorded accidents at this location (synthetic/sample data)</div>
               </div>
             </div>
-            <div class="chart-box" style="height:220px;position:relative;"><canvas id="chart-risk-history" width="400" height="220" style="display:block;"></canvas></div>
+            <div id="hist-card-content">
+              <div class="chart-box" style="height:170px;position:relative;"><canvas id="chart-risk-history" width="400" height="170" style="display:block;"></canvas></div>
+              <div id="hist-location-stats" style="margin-top:12px;"></div>
+            </div>
           </div>
         </div>
 
@@ -1161,7 +1154,7 @@
           </div>
           <span class="badge b-purple" id="yolo-model-badge">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M12 2 4 5v6c0 5.2 3.4 9.6 8 11 4.6-1.4 8-5.8 8-11V5l-8-3Z"/></svg>
-            YOLOv8n · COCO Pretrained
+            <span id="yolo-model-badge-text">YOLOv8s · Loading...</span>
           </span>
         </div>
 
@@ -1181,7 +1174,7 @@
               </div>
             </div>
             <div class="kpi-value" id="yolo-kpi-total" data-count="0">0</div>
-            <div class="kpi-label">Total Vehicles Detected</div>
+            <div class="kpi-label" id="yolo-kpi-total-label">Total Vehicles (Tripwire)</div>
           </div>
           <div class="card kpi-card hoverable animate-slideUp delay-3">
             <div class="kpi-top">
@@ -1210,7 +1203,7 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2h4v4h-4z"/><path d="M12 6v6M9 9h6"/><rect x="2" y="12" width="20" height="8" rx="2"/><circle cx="7" cy="20" r="1.6"/><circle cx="17" cy="20" r="1.6"/></svg>
             </div>
             <div>
-              <div style="font-size:14px; font-weight:800; color:#fff; margin-bottom:2px;">⚠️ Emergency / Priority Vehicle Detected</div>
+              <div style="font-size:14px; font-weight:800; color:#fff; margin-bottom:2px;">⚠️ Priority Vehicle Detected</div>
               <div class="text-dim" style="font-size:12px;">Large bus or truck detected in frame — consider granting signal priority to this lane.</div>
             </div>
           </div>
@@ -1224,7 +1217,7 @@
             <div class="card-head">
               <div class="card-head-text">
                 <h3>Detection Feed</h3>
-                <div class="card-sub">Upload a traffic video — YOLOv8 will annotate the best detection frame</div>
+                <div class="card-sub" id="yolo-feed-sub">YOLOv8 + ByteTrack will annotate the full video and count vehicles crossing the line</div>
               </div>
               <span class="badge b-green" id="yolo-live-badge" style="display:none;"><span class="dot-status live"></span>Processed</span>
             </div>
@@ -1233,7 +1226,7 @@
             <div id="yolo-dropzone" style="
               border: 2px dashed var(--border);
               border-radius: 12px;
-              padding: 32px 20px;
+              padding: 28px 20px;
               text-align: center;
               cursor: pointer;
               margin-bottom: 16px;
@@ -1244,13 +1237,13 @@
                ondragleave="this.style.borderColor='var(--border)';"
                ondrop="handleYoloDrop(event)">
               <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin:0 auto 10px;display:block;"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2M12 12v5M9.5 14.5l2.5-2.5 2.5 2.5"/></svg>
-              <div style="font-size:14px;font-weight:700;margin-bottom:4px;">Drop your traffic video here</div>
-              <div class="text-dim" style="font-size:12px;">or click to browse · MP4, AVI, MOV, MKV or JPG/PNG</div>
-              <div id="yolo-file-name" class="text-faint" style="font-size:11.5px;margin-top:8px;"></div>
+              <div style="font-size:14px;font-weight:700;margin-bottom:4px;">Drop your traffic video or image here</div>
+              <div class="text-dim" style="font-size:12px;">or click to browse · MP4, AVI, MOV, MKV up to 200 MB or JPG/PNG</div>
+              <div id="yolo-file-name" style="font-size:12px; font-weight:700; color:var(--primary); margin-top:8px;"></div>
             </div>
             <input type="file" id="yolo-file-input" accept="video/*,image/*" style="display:none;" onchange="onYoloFileSelected(this)">
 
-            <!-- Confidence threshold slider (matches reference repo Streamlit sidebar) -->
+            <!-- Confidence threshold slider -->
             <div style="margin-bottom:16px;">
               <div class="flex justify-between items-center" style="margin-bottom:6px;">
                 <label style="font-size:12px;font-weight:700;">Confidence Threshold</label>
@@ -1264,8 +1257,33 @@
               </div>
             </div>
 
+            <!-- Upload / Processing Progress bar -->
+            <div id="yolo-progress-wrap" style="display:none; margin-bottom:16px; padding:14px 16px; background:rgba(45,124,255,0.08); border:1px solid rgba(45,124,255,0.25); border-radius:10px;">
+              <div class="flex justify-between items-center" style="font-size:12px; font-weight:700; margin-bottom:6px;">
+                <span id="yolo-progress-label" style="color:var(--primary);">Processing video stream...</span>
+                <span id="yolo-progress-pct" style="color:#ffffff;">0%</span>
+              </div>
+              <div class="pbar-track" style="margin-bottom:8px; height:8px; background:rgba(255,255,255,0.1);">
+                <div class="pbar-fill" id="yolo-progress-bar" style="width:0%; background:var(--primary); transition:width .2s;"></div>
+              </div>
+              <div class="flex justify-between items-center" style="font-size:11.5px; color:#cbd5e1;">
+                <span id="yolo-progress-detail">Estimating runtime...</span>
+                <button type="button" class="btn btn-sm btn-secondary" id="yolo-cancel-btn" onclick="cancelYoloDetection()" style="padding:2px 10px; font-size:11px;">Cancel</button>
+              </div>
+            </div>
+
+            <!-- Inline Error Box -->
+            <div id="yolo-error-wrap" style="display:none; margin-bottom:16px; padding:14px 16px; background:rgba(240,68,56,0.12); border:1px solid var(--red); border-radius:10px;">
+              <div class="flex items-center gap-8" style="color:var(--red); font-weight:700; font-size:13px; margin-bottom:4px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                Detection Failed
+              </div>
+              <div id="yolo-error-msg" style="font-size:12px; color:#f1f5f9; margin-bottom:10px; line-height:1.45;"></div>
+              <button type="button" class="btn btn-sm btn-secondary" onclick="retryYoloDetection()">Try Again</button>
+            </div>
+
             <!-- Processing button -->
-            <button class="btn btn-primary btn-block ripple-surface" id="yolo-detect-btn" onclick="runYoloDetection()" disabled style="margin-bottom:10px;">
+            <button class="btn btn-primary btn-block ripple-surface" id="yolo-detect-btn" onclick="runYoloDetection()" disabled style="margin-bottom:12px;">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg>
               <span id="yolo-detect-btn-text">Run YOLOv8 Detection</span>
               <span class="spinner" id="yolo-spinner" style="display:none;"></span>
@@ -1275,16 +1293,19 @@
             <a id="yolo-download-btn" href="#" style="display:none;" class="btn btn-block ripple-surface"
                style="margin-bottom:18px; background:var(--green-soft); border:1px solid var(--green); color:var(--green);">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              Download Annotated Video (output.mp4)
+              Download Annotated Video
             </a>
 
-
-            <!-- Annotated frame output -->
+            <!-- Annotated frame/video output -->
             <div id="yolo-frame-wrap" style="display:none;">
-              <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-faint);margin-bottom:8px;letter-spacing:0.06em;">Best Detection Frame — Annotated Output</div>
-              <img id="yolo-annotated-img" src="" alt="Annotated detection frame" style="
-                width:100%; border-radius:10px; display:block;
-                border:2px solid var(--border); object-fit:contain; max-height:420px;
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-faint);margin-bottom:8px;letter-spacing:0.06em;">Annotated Result Stream</div>
+              <video id="yolo-annotated-video" controls playsinline style="
+                width:100%; border-radius:10px; display:none; max-height:460px;
+                border:2px solid var(--border); background:#000;
+              "></video>
+              <img id="yolo-annotated-img" src="" alt="Annotated detection output" style="
+                width:100%; border-radius:10px; display:none;
+                border:2px solid var(--border); object-fit:contain; max-height:460px;
               ">
               <div class="legend-row" style="margin-top:10px;">
                 <div class="legend-item"><span class="legend-swatch" style="background:#17B26A;"></span>Car</div>
@@ -1295,9 +1316,12 @@
               </div>
             </div>
 
-            <!-- Placeholder road scene when nothing uploaded -->
-            <div class="detect-stage" id="yolo-detect-stage" style="height:360px;">
-              <div class="live-badge"><span class="dot"></span>READY</div>
+            <!-- Honest Empty State -->
+            <div class="detect-stage" id="yolo-detect-stage" style="height:360px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:24px; background:rgba(15,23,42,0.6); border:1px dashed rgba(255,255,255,0.14); border-radius:12px; position:relative;">
+              <div class="live-badge" style="background:rgba(23,178,106,0.15); color:var(--green); border:1px solid var(--green);"><span class="dot" style="background:var(--green);"></span>READY</div>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:12px;"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2M12 12v5M9.5 14.5l2.5-2.5 2.5 2.5"/></svg>
+              <div id="yolo-stage-title" style="font-size:14px; font-weight:700; color:#e2e8f0; margin-bottom:4px;">No Video Selected</div>
+              <div id="yolo-stage-sub" class="text-dim" style="font-size:12px; max-width:340px;">Select an MP4/video above to run YOLOv8 object detection and ByteTrack line-crossing analysis</div>
             </div>
           </div>
 
@@ -1330,7 +1354,7 @@
               </div>
               <div id="yolo-priority-output">
                 <div class="text-dim" style="font-size:12px; text-align:center; padding:16px 0;">
-                  Priority signals will be shown after detection
+                  Priority decisions will be evaluated after detection
                 </div>
               </div>
             </div>
@@ -1342,11 +1366,12 @@
                   <h3>Model Info</h3>
                 </div>
               </div>
-              <div class="flex justify-between" style="padding:7px 0; font-size:12.5px;"><span class="text-dim" style="font-weight:600;">Model</span><span style="font-weight:700;">YOLOv8s (Enhanced)</span></div>
-              <div class="flex justify-between" style="padding:7px 0; font-size:12.5px;"><span class="text-dim" style="font-weight:600;">Tracking</span><span style="font-weight:700;">ByteTrack Multi-Object</span></div>
-              <div class="flex justify-between" style="padding:7px 0; font-size:12.5px;"><span class="text-dim" style="font-weight:600;">Vehicle Classes</span><span style="font-weight:700;">Car, Truck, Bus, Bike</span></div>
-              <div class="flex justify-between" style="padding:7px 0; font-size:12.5px;"><span class="text-dim" style="font-weight:600;">Confidence</span><span style="font-weight:700;">≥ 0.35</span></div>
-              <div class="flex justify-between" style="padding:7px 0; font-size:12.5px;"><span class="text-dim" style="font-weight:600;">Status</span><span class="badge b-green"><span class="dot-status live"></span>Online</span></div>
+              <div class="flex justify-between" style="padding:7px 0; font-size:12.5px;"><span class="text-dim" style="font-weight:600;">Model</span><span style="font-weight:700;" id="yolo-info-model">YOLOv8s (Enhanced)</span></div>
+              <div class="flex justify-between" style="padding:7px 0; font-size:12.5px;"><span class="text-dim" style="font-weight:600;">Device</span><span style="font-weight:700;" id="yolo-info-device">CPU</span></div>
+              <div class="flex justify-between" style="padding:7px 0; font-size:12.5px;"><span class="text-dim" style="font-weight:600;">Tracking</span><span style="font-weight:700;" id="yolo-info-tracker">ByteTrack Multi-Object</span></div>
+              <div class="flex justify-between" style="padding:7px 0; font-size:12.5px;"><span class="text-dim" style="font-weight:600;">Vehicle Classes</span><span style="font-weight:700;" id="yolo-info-classes">Car, Truck, Bus, Motorcycle, Bicycle</span></div>
+              <div class="flex justify-between" style="padding:7px 0; font-size:12.5px;"><span class="text-dim" style="font-weight:600;">Confidence</span><span style="font-weight:700;" id="yolo-info-conf">≥ 0.35</span></div>
+              <div class="flex justify-between" style="padding:7px 0; font-size:12.5px;"><span class="text-dim" style="font-weight:600;">Status</span><span class="badge b-green" id="yolo-info-status"><span class="dot-status live"></span>Online</span></div>
             </div>
           </div>
         </div>
@@ -1525,18 +1550,18 @@
       <section class="page" id="page-reports">
         <div class="page-header animate-fadeIn">
           <div>
-            <h1>Reports</h1>
-            <p>Generate, schedule and download road safety reports</p>
+            <h1>Safety Audit Reports</h1>
+            <p>Generate, preview and download authoritative road safety audit reports</p>
           </div>
-          <button class="btn btn-primary ripple-surface"
-            onclick="showToast('success','Report generated','New report has been added to the list below.')"><svg
-              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+          <button class="btn btn-primary ripple-surface" id="reports-open-modal-btn" onclick="openReportModal()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round">
               <path d="M12 5v14M5 12h14" />
-            </svg>Generate New Report</button>
+            </svg>Generate New Report
+          </button>
         </div>
 
-        <div class="grid grid-4 mb-16">
+        <div class="grid grid-3 mb-16">
           <div class="card kpi-card hoverable animate-slideUp delay-1">
             <div class="kpi-top">
               <div class="kpi-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -1545,7 +1570,7 @@
                   <path d="M14 2v6h6" />
                 </svg></div>
             </div>
-            <div class="kpi-value" data-count="6">0</div>
+            <div class="kpi-value" id="reports-stat-today">0</div>
             <div class="kpi-label">Today's Reports</div>
           </div>
           <div class="card kpi-card hoverable animate-slideUp delay-2">
@@ -1556,7 +1581,7 @@
                   <path d="M16 2v4M8 2v4M3 10h18" />
                 </svg></div>
             </div>
-            <div class="kpi-value" data-count="47">0</div>
+            <div class="kpi-value" id="reports-stat-month">0</div>
             <div class="kpi-label">Monthly Reports</div>
           </div>
           <div class="card kpi-card hoverable animate-slideUp delay-3">
@@ -1567,19 +1592,8 @@
                   <path d="M7 10l5 5 5-5M12 15V3" />
                 </svg></div>
             </div>
-            <div class="kpi-value" data-count="312">0</div>
-            <div class="kpi-label">Downloads</div>
-          </div>
-          <div class="card kpi-card hoverable animate-slideUp delay-4">
-            <div class="kpi-top">
-              <div class="kpi-icon orange"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                  stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M12 7v5l3 3" />
-                </svg></div>
-            </div>
-            <div class="kpi-value" data-count="9">0</div>
-            <div class="kpi-label">Scheduled Reports</div>
+            <div class="kpi-value" id="reports-stat-downloads">0</div>
+            <div class="kpi-label">Total Downloads</div>
           </div>
         </div>
 
@@ -1591,16 +1605,16 @@
                 <div class="card-sub">6-month summary</div>
               </div>
             </div>
-            <div class="chart-box" style="height:220px;"><canvas id="chart-reports-accidents"></canvas></div>
+            <div class="chart-box" style="height:220px;position:relative;"><canvas id="chart-reports-accidents"></canvas></div>
           </div>
           <div class="card col-span-6 card-pad hoverable animate-slideUp delay-4">
             <div class="card-head">
               <div class="card-head-text">
                 <h3>Hotspot Trends</h3>
-                <div class="card-sub">Risk zone evolution</div>
+                <div class="card-sub">Top 5 risk zones monthly evolution</div>
               </div>
             </div>
-            <div class="chart-box" style="height:220px;"><canvas id="chart-reports-hotspots"></canvas></div>
+            <div class="chart-box" style="height:220px;position:relative;"><canvas id="chart-reports-hotspots"></canvas></div>
           </div>
         </div>
 
@@ -1608,6 +1622,7 @@
           <div class="card-head">
             <div class="card-head-text">
               <h3>Generated Reports</h3>
+              <div class="card-sub">Audit reports available for download and preview</div>
             </div>
           </div>
           <div class="table-wrap">
@@ -1615,13 +1630,18 @@
               <thead>
                 <tr>
                   <th>Report Name</th>
+                  <th>Type</th>
                   <th>Generated By</th>
-                  <th>Date</th>
+                  <th>Date &amp; Time</th>
+                  <th>Size</th>
+                  <th>Downloads</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
               </thead>
-              <tbody id="reports-table"></tbody>
+              <tbody id="reports-table">
+                <tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8;">Loading generated reports...</td></tr>
+              </tbody>
             </table>
           </div>
         </div>
@@ -1634,46 +1654,60 @@
             <h1>Data Management</h1>
             <p>Manage the accident records dataset — add, edit, import or export</p>
           </div>
+          <div class="flex gap-10" style="flex-wrap:wrap;">
+            <button class="btn btn-secondary ripple-surface" id="data-import-btn" onclick="openImportModal()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <path d="M17 8l-5-5-5 5M12 3v12" />
+              </svg>Import CSV
+            </button>
+            <button class="btn btn-secondary ripple-surface" id="data-export-btn" onclick="exportDataRecords()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <path d="M7 10l5 5 5-5M12 15V3" />
+              </svg>Export CSV
+            </button>
+            <button class="btn btn-primary ripple-surface" id="data-add-btn" onclick="openAddRecordModal()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>Add Record
+            </button>
+          </div>
         </div>
 
         <div class="card card-pad mb-16 hoverable animate-slideUp delay-1">
           <div class="flex items-center justify-between gap-16" style="flex-wrap:wrap;">
-            <div class="topbar-search" style="width:280px; background:#F8FAFD; border-color:var(--border);">
-              <svg viewBox="0 0 24 24" fill="none" stroke="#93A0BD" stroke-width="2" stroke-linecap="round"
-                stroke-linejoin="round">
+            <div class="topbar-search" style="width:280px; background:#0d2240; border-color:var(--border);">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="11" cy="11" r="7" />
                 <path d="m21 21-4.3-4.3" />
               </svg>
-              <input type="text" placeholder="Search accident ID, location..." style="color:#0d2240; font-weight:500;"
-                oninput="filterDataTable(this.value)">
+              <input type="text" id="data-search-input" placeholder="Search accident ID, road, cause..." style="color:#ffffff; font-weight:500;"
+                oninput="onDataSearchInput(this.value)">
             </div>
             <div class="flex gap-10" style="flex-wrap:wrap;">
-              <select class="form-control" style="width:150px;">
-                <option>All Severity</option>
-                <option>High</option>
-                <option>Medium</option>
-                <option>Low</option>
+              <select class="form-control" id="data-filter-severity" style="width:140px;" onchange="loadDataRecords(1)">
+                <option value="">All Severity</option>
+                <option value="fatal">Fatal</option>
+                <option value="major">Major</option>
+                <option value="minor">Minor</option>
               </select>
-              <button class="btn btn-secondary ripple-surface"
-                onclick="showToast('info','Import CSV','File picker would open here (demo mode — no backend).')"><svg
-                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                  stroke-linejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <path d="M17 8l-5-5-5 5M12 3v12" />
-                </svg>Import CSV</button>
-              <button class="btn btn-secondary ripple-surface"
-                onclick="showToast('success','Export complete','accident_records.csv has been downloaded.')"><svg
-                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                  stroke-linejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <path d="M7 10l5 5 5-5M12 15V3" />
-                </svg>Export CSV</button>
-              <button class="btn btn-primary ripple-surface"
-                onclick="showToast('success','Record added','New accident record has been created.')"><svg
-                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                  stroke-linejoin="round">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>Add Record</button>
+              <select class="form-control" id="data-filter-area" style="width:140px;" onchange="loadDataRecords(1)">
+                <option value="">All Areas</option>
+                <option value="Edappally">Edappally</option>
+                <option value="Fort Kochi">Fort Kochi</option>
+                <option value="Kadavanthra">Kadavanthra</option>
+                <option value="Kakkanad">Kakkanad</option>
+                <option value="Mattancherry">Mattancherry</option>
+                <option value="Palarivattom">Palarivattom</option>
+                <option value="Vyttila">Vyttila</option>
+              </select>
+              <select class="form-control" id="data-filter-source" style="width:130px;" onchange="loadDataRecords(1)">
+                <option value="">All Sources</option>
+                <option value="sample">Sample</option>
+                <option value="synthetic">Synthetic</option>
+                <option value="real">Real</option>
+              </select>
             </div>
           </div>
         </div>
@@ -1682,7 +1716,7 @@
           <div class="card-head">
             <div class="card-head-text">
               <h3>Accident Records</h3>
-              <div class="card-sub">248 total rows · showing sample dataset</div>
+              <div class="card-sub" id="data-table-count">Loading records...</div>
             </div>
           </div>
           <div class="table-wrap">
@@ -1690,18 +1724,24 @@
               <thead>
                 <tr>
                   <th>Accident ID</th>
-                  <th>Location</th>
-                  <th>Latitude</th>
-                  <th>Longitude</th>
-                  <th>Weather</th>
+                  <th>Occurred At</th>
+                  <th>Area</th>
+                  <th>Road Name</th>
                   <th>Severity</th>
-                  <th>Risk Score</th>
+                  <th>Cause</th>
+                  <th>Weather</th>
+                  <th>Vehicles</th>
+                  <th>Casualties</th>
+                  <th>Source</th>
                   <th>Actions</th>
                 </tr>
               </thead>
-              <tbody id="data-table-body"></tbody>
+              <tbody id="data-table-body">
+                <tr><td colspan="11" style="text-align:center;padding:24px;color:#94a3b8;">Loading accident records...</td></tr>
+              </tbody>
             </table>
           </div>
+          <div class="table-pagination" id="data-pagination"></div>
         </div>
       </section>
 
@@ -1855,11 +1895,239 @@
     </div>
   </div>
 
+  <!-- ========================= MODALS ========================= -->
+  <!-- 1. Generate Report Modal -->
+  <div class="modal-overlay" id="report-generate-modal" style="display:none;">
+    <div class="modal-dialog">
+      <div class="modal-head">
+        <h3>Generate Safety Audit Report</h3>
+        <button class="modal-close-btn" onclick="closeModal('report-generate-modal')">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <form id="report-gen-form" onsubmit="submitGenerateReport(event)">
+          <div class="form-group mb-16">
+            <label>Report Type</label>
+            <select class="form-control" id="rep-gen-type" required>
+              <option value="monthly_summary">Monthly Accident Summary</option>
+              <option value="hotspot_report">Accident Hotspots & Corridors Audit</option>
+              <option value="severity_analysis">Crash Severity & Casualties Analysis</option>
+              <option value="full_dataset">Complete Incident Dataset Audit</option>
+            </select>
+          </div>
+          <div class="form-row mb-16">
+            <div class="form-group">
+              <label>Date From</label>
+              <input type="date" class="form-control" id="rep-gen-date-from">
+            </div>
+            <div class="form-group">
+              <label>Date To</label>
+              <input type="date" class="form-control" id="rep-gen-date-to">
+            </div>
+          </div>
+          <div class="form-row mb-16">
+            <div class="form-group">
+              <label>Area / Corridor (Optional)</label>
+              <select class="form-control" id="rep-gen-area">
+                <option value="">All Kochi Areas</option>
+                <option value="Edappally">Edappally</option>
+                <option value="Fort Kochi">Fort Kochi</option>
+                <option value="Kadavanthra">Kadavanthra</option>
+                <option value="Kakkanad">Kakkanad</option>
+                <option value="Mattancherry">Mattancherry</option>
+                <option value="Palarivattom">Palarivattom</option>
+                <option value="Vyttila">Vyttila</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>File Format</label>
+              <select class="form-control" id="rep-gen-format" required>
+                <option value="pdf" selected>PDF Document (.pdf)</option>
+                <option value="csv">CSV Spreadsheet (.csv)</option>
+              </select>
+            </div>
+          </div>
+          <div class="modal-foot" style="padding:16px 0 0; border-top:1px solid rgba(192,230,253,0.12); margin-top:20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('report-generate-modal')">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="rep-gen-submit-btn">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15l3 3 3-3"/></svg>
+              Generate Report
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Preview Report Modal -->
+  <div class="modal-overlay" id="report-preview-modal" style="display:none;">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-head">
+        <h3 id="preview-modal-title">Report Preview</h3>
+        <button class="modal-close-btn" onclick="closeModal('report-preview-modal')">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" id="preview-modal-body" style="padding:16px;"></div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('report-preview-modal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Add / Edit Record Modal -->
+  <div class="modal-overlay" id="record-modal" style="display:none;">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-head">
+        <h3 id="record-modal-title">Add Accident Record</h3>
+        <button class="modal-close-btn" onclick="closeModal('record-modal')">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <form id="record-form" onsubmit="submitRecordForm(event)">
+          <input type="hidden" id="rec-id">
+          <div class="form-row mb-16">
+            <div class="form-group">
+              <label>Date &amp; Time (Occurred At)</label>
+              <input type="datetime-local" class="form-control" id="rec-occurred-at" required>
+            </div>
+            <div class="form-group">
+              <label>Area / Zone</label>
+              <select class="form-control" id="rec-area" required onchange="populateRecordRoads(this.value)">
+                <option value="Edappally">Edappally</option>
+                <option value="Fort Kochi">Fort Kochi</option>
+                <option value="Kadavanthra">Kadavanthra</option>
+                <option value="Kakkanad">Kakkanad</option>
+                <option value="Mattancherry">Mattancherry</option>
+                <option value="Palarivattom">Palarivattom</option>
+                <option value="Vyttila">Vyttila</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row mb-16">
+            <div class="form-group">
+              <label>Road Name</label>
+              <select class="form-control" id="rec-road-name" required></select>
+            </div>
+            <div class="form-group">
+              <label>Road Type</label>
+              <select class="form-control" id="rec-road-type" required>
+                <option value="urban">Urban</option>
+                <option value="highway">Highway</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row mb-16">
+            <div class="form-group">
+              <label>Severity</label>
+              <select class="form-control" id="rec-severity" required>
+                <option value="minor">Minor</option>
+                <option value="major">Major</option>
+                <option value="fatal">Fatal</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Primary Cause</label>
+              <select class="form-control" id="rec-cause" required>
+                <option value="overspeeding">Overspeeding / Rash Driving</option>
+                <option value="weather">Weather / Slippery Surface</option>
+                <option value="drunk driving">Driving Under Influence</option>
+                <option value="distraction">Distraction</option>
+                <option value="poor road">Poor Road Surface / Pothole</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row mb-16">
+            <div class="form-group">
+              <label>Weather</label>
+              <select class="form-control" id="rec-weather" required>
+                <option value="clear">Clear</option>
+                <option value="rainy">Rainy</option>
+                <option value="foggy">Foggy</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Traffic Density</label>
+              <select class="form-control" id="rec-density" required>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row mb-16">
+            <div class="form-group">
+              <label>Vehicles Involved</label>
+              <input type="number" class="form-control" id="rec-vehicles" min="1" max="20" value="2" required>
+            </div>
+            <div class="form-group">
+              <label>Casualties</label>
+              <input type="number" class="form-control" id="rec-casualties" min="0" max="20" value="0" required>
+            </div>
+          </div>
+          <div class="modal-foot" style="padding:16px 0 0; border-top:1px solid rgba(192,230,253,0.12); margin-top:20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('record-modal')">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="rec-submit-btn">Save Record</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. View Record Modal -->
+  <div class="modal-overlay" id="record-view-modal" style="display:none;">
+    <div class="modal-dialog">
+      <div class="modal-head">
+        <h3 id="record-view-title">Accident Record Details</h3>
+        <button class="modal-close-btn" onclick="closeModal('record-view-modal')">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" id="record-view-body"></div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('record-view-modal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. Import CSV Modal -->
+  <div class="modal-overlay" id="record-import-modal" style="display:none;">
+    <div class="modal-dialog">
+      <div class="modal-head">
+        <h3>Import Accident Records CSV</h3>
+        <button class="modal-close-btn" onclick="closeModal('record-import-modal')">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-16">Upload a CSV file conforming to the Kochi accident dataset format. All rows will be validated before insertion.</p>
+        <div style="margin-bottom:16px;">
+          <a href="/api/records/template.csv" class="btn btn-secondary" download style="display:inline-flex;align-items:center;gap:6px;font-size:12px;">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></svg>
+            Download CSV Template
+          </a>
+        </div>
+        <div class="form-group mb-16">
+          <label>Select CSV File</label>
+          <input type="file" id="import-csv-file" accept=".csv" class="form-control" style="padding:8px;">
+        </div>
+        <div id="import-result-wrap" style="display:none;margin-top:14px;padding:12px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid rgba(192,230,253,0.12);"></div>
+        <div class="modal-foot" style="padding:16px 0 0; border-top:1px solid rgba(192,230,253,0.12); margin-top:20px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('record-import-modal')">Close</button>
+          <button type="button" class="btn btn-primary" id="import-submit-btn" onclick="submitImportCSV()">Start Import</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="toast-container"></div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
-  <script src="{{ url_for('static', filename='script.js') }}?v=12"></script>
+  <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
+  <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='api.js') }}?v=fix3"></script>
+  <script src="{{ url_for('static', filename='script.js') }}?v=fix3"></script>
 </body>
 
 </html>

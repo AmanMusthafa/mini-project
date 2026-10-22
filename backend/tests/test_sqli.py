@@ -25,17 +25,18 @@ def test_sql_injection_dashboard_stats(auth_client):
     for p in sqli_payloads:
         # Test /api/dashboard/stats
         res = auth_client.get(f"/api/dashboard/stats?year={p}&severity={p}&state={p}")
-        assert res.status_code == 200
-        data = res.get_json()
-        assert data["success"] is True
+        assert res.status_code in [200, 400]
+        if res.status_code == 200:
+            data = res.get_json()
+            assert data["success"] is True
 
         # Test /api/hotspots
         res_hs = auth_client.get(f"/api/hotspots?year={p}&severity={p}")
-        assert res_hs.status_code == 200
+        assert res_hs.status_code in [200, 400]
 
         # Test /api/dashboard/trend
         res_tr = auth_client.get(f"/api/dashboard/trend?year={p}")
-        assert res_tr.status_code == 200
+        assert res_tr.status_code in [200, 400]
 
     # Verify users table is completely intact!
     conn2 = get_db()

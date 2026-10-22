@@ -33,8 +33,8 @@ class Config:
     ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
     ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'Admin@123')
 
-    # File uploads
-    MAX_UPLOAD_MB = int(os.getenv('MAX_UPLOAD_MB', 50))
+    # File uploads - default 200 MB for video workloads
+    MAX_UPLOAD_MB = int(os.getenv('MAX_UPLOAD_MB', 200))
     MAX_CONTENT_LENGTH = MAX_UPLOAD_MB * 1024 * 1024
 
     # YOLO Weights
@@ -48,5 +48,7 @@ class Config:
     # ML Model directory
     ML_MODELS_DIR = str(BASE_DIR / 'backend' / 'ml' / 'models')
 
-    # Job / Temporary directory
-    JOBS_DIR = str(BASE_DIR / 'tmp' / 'jobs')
+    # Job / Temporary directory (lives outside watched source tree to prevent reloader restarts)
+    import tempfile
+    default_jobs = str(Path(tempfile.gettempdir()) / 'roadsafety_jobs')
+    JOBS_DIR = os.getenv('JOBS_DIR', default_jobs)

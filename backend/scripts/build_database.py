@@ -21,7 +21,7 @@ from backend.scripts.generate_synthetic_data import generate_dataset
 SCHEMA_SQL = """
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS accidents;
-DROP TABLE IF EXISTS road_accidents; -- legacy alias dropped
+DROP VIEW IF EXISTS road_accidents;
 DROP TABLE IF EXISTS audit_log;
 DROP TABLE IF EXISTS emergency_events;
 DROP TABLE IF EXISTS predictions;
@@ -132,6 +132,19 @@ CREATE TABLE predictions (
     all_probabilities TEXT NOT NULL,
     expected_severity_score REAL NOT NULL,
     top_factors TEXT
+);
+
+CREATE TABLE reports (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    params_json TEXT,
+    generated_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
+    download_count INTEGER DEFAULT 0
 );
 
 -- Performance Indexes

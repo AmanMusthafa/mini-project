@@ -99,14 +99,28 @@ def generate_shap_recommendations(predicted_severity, top_shap_features, input_d
         list of recommendation objects
     """
     if predicted_severity == "minor":
-        return [{
-            "title": "Routine Safety Monitoring",
-            "category": "Preventive Maintenance",
-            "description": "No critical high-severity crash drivers identified by the model. Continue standard corridor surveillance and periodic maintenance.",
-            "action": "Maintain routine speed checks and pavement inspections.",
-            "trigger": "Model predicted Minor severity; low risk profile",
-            "priority": "Low"
-        }]
+        return [
+            {
+                "title": "Routine Safety Monitoring",
+                "category": "Preventive Maintenance",
+                "description": "No high-severity drivers identified. Standard conditions observed with low collision probability.",
+                "action": "Maintain routine corridor speed monitoring and quarterly pavement maintenance.",
+                "trigger": "Model predicted Minor severity; low risk profile",
+                "triggered_by": "Model predicted Minor severity; low risk profile",
+                "priority": "Low",
+                "disclaimer": "Decision-support suggestion based on feature attribution; requires engineering site survey."
+            },
+            {
+                "title": "Defensive Driving & Speed Awareness",
+                "category": "Driver Safety",
+                "description": "Keep approach speeds within designated limits and maintain adequate headway in traffic.",
+                "action": "Display standard road safety reminders on dynamic message signs.",
+                "trigger": "Preventive tip for urban corridors",
+                "triggered_by": "Preventive tip for urban corridors",
+                "priority": "Low",
+                "disclaimer": "Decision-support suggestion based on feature attribution; requires engineering site survey."
+            }
+        ]
 
     recommendations = []
     seen_titles = set()
@@ -145,6 +159,7 @@ def generate_shap_recommendations(predicted_severity, top_shap_features, input_d
                 "description": item["description"],
                 "action": item["action"],
                 "trigger": evidence,
+                "triggered_by": evidence,
                 "priority": priority,
                 "disclaimer": "Decision-support suggestion based on feature attribution; requires engineering site survey."
             })
@@ -160,6 +175,7 @@ def generate_shap_recommendations(predicted_severity, top_shap_features, input_d
             "description": "High accident severity anticipated from combined multi-factor conditions. Conduct an IRC-compliant road safety inspection.",
             "action": "Deploy traffic safety engineers to assess sight distance, signs, and speed calming.",
             "trigger": f"Composite risk factors elevated for {predicted_severity.title()} severity",
+            "triggered_by": f"Composite risk factors elevated for {predicted_severity.title()} severity",
             "priority": "High",
             "disclaimer": "Decision-support suggestion based on feature attribution; requires engineering site survey."
         })

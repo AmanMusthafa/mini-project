@@ -3,9 +3,9 @@
   "version": "2.0.0",
   "task": "Multiclass Post-Incident Severity Classification (minor, major, fatal)",
   "framework": "XGBoost + scikit-learn",
-  "training_date": "2026-10-20 15:01:11",
+  "training_date": "2026-10-21 15:26:02",
   "seed": 42,
-  "runtime_seconds": 16.89,
+  "runtime_seconds": 13.83,
   "library_versions": {
     "xgboost": "3.4.1",
     "scikit_learn": "1.9.0",
@@ -16,9 +16,9 @@
   "dataset": {
     "city": "Kochi",
     "state": "Kerala",
-    "total_rows_trained": 14964,
+    "total_rows_trained": 14945,
     "data_source_distribution": {
-      "synthetic": 14964
+      "synthetic": 14945
     },
     "time_range": "2023-01-01 06:12 to 2026-10-20 22:03",
     "split_strategy": "Chronological hold-out (Train: <=2025, Test: 2026)"
@@ -45,17 +45,17 @@
     "target": "severity"
   },
   "metrics": {
-    "test_accuracy": 0.4546,
-    "test_balanced_accuracy": 0.442,
-    "test_macro_f1": 0.4421,
-    "roc_auc_ovr": 0.6366,
-    "cv_5fold_macro_f1": "0.4441 +/- 0.0051",
-    "majority_baseline_accuracy": 0.3711,
-    "majority_baseline_macro_f1": 0.1804,
+    "test_accuracy": 0.7173,
+    "test_balanced_accuracy": 0.3422,
+    "test_macro_f1": 0.2985,
+    "roc_auc_ovr": 0.6501,
+    "cv_5fold_macro_f1": "0.3249 +/- 0.0040",
+    "majority_baseline_accuracy": 0.7145,
+    "majority_baseline_macro_f1": 0.2778,
     "per_class_recall": {
-      "minor": 0.4964,
-      "major": 0.554,
-      "fatal": 0.2757
+      "minor": 0.9952,
+      "major": 0.0255,
+      "fatal": 0.006
     }
   },
   "limitations_and_ethics": [

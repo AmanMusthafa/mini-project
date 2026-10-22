@@ -201,31 +201,31 @@ def generate_accident_row(idx, start_date, end_date):
     vehicles_involved = random.choices([1, 2, 3, 4], weights=[0.35, 0.50, 0.12, 0.03])[0]
 
     # Multi-Factor Probabilistic Severity Model (Log-Odds)
-    # Realistic accident distribution: minor dominant (~60%), major (~26%), fatal (~14%)
-    log_odds_major = -0.9
-    log_odds_fatal = -1.7
+    # Defensible realistic urban accident distribution: minor (~74%), major (~22%), fatal (~4%)
+    log_odds_major = -2.2
+    log_odds_fatal = -4.5
 
     # Cause influence
     if cause == "overspeeding":
-        log_odds_major += 1.2
-        log_odds_fatal += 1.6
+        log_odds_major += 1.0
+        log_odds_fatal += 1.5
     elif cause == "drunk driving":
-        log_odds_major += 1.4
-        log_odds_fatal += 1.9
+        log_odds_major += 1.2
+        log_odds_fatal += 1.8
     elif cause == "poor road":
-        log_odds_major += 0.5
+        log_odds_major += 0.4
         log_odds_fatal += 0.3
     elif cause == "weather":
-        log_odds_major += 0.7
-        log_odds_fatal += 0.5
+        log_odds_major += 0.5
+        log_odds_fatal += 0.4
     elif cause == "distraction":
-        log_odds_major += 0.3
+        log_odds_major += 0.2
         log_odds_fatal += 0.1
 
     # Infrastructure influence
     if road_type == "highway":
-        log_odds_major += 0.6
-        log_odds_fatal += 0.9
+        log_odds_major += 0.5
+        log_odds_fatal += 0.8
     if traffic_signal == 0 and "Junction" in road_name:
         log_odds_major += 0.4
         log_odds_fatal += 0.5
@@ -242,8 +242,8 @@ def generate_accident_row(idx, start_date, end_date):
 
     # Multi-vehicle collision
     if vehicles_involved >= 3:
-        log_odds_major += 0.8
-        log_odds_fatal += 1.0
+        log_odds_major += 0.7
+        log_odds_fatal += 0.9
 
     # Softmax conversion
     score_minor = 1.0

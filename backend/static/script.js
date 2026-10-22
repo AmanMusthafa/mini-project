@@ -33,6 +33,18 @@ const TIER_LABEL = {veryhigh:'Very High', high:'High', moderate:'Moderate', low:
 
 function rnd(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
 
+/* Escape HTML to prevent XSS and DOM injection */
+function escapeHtml(str){
+  if(str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+window.escapeHtml = escapeHtml;
+
 /* ================================================================
    TOAST NOTIFICATIONS
    ================================================================ */
@@ -53,7 +65,7 @@ function showToast(type, title, msg){
   container.appendChild(el);
   const remove = ()=>{ el.classList.add('leaving'); setTimeout(()=>el.remove(), 280); };
   el.querySelector('.toast-close').addEventListener('click', remove);
-  setTimeout(remove, 4200);
+  setTimeout(remove, 6000);
 }
 window.showToast = showToast;
 
@@ -251,36 +263,52 @@ document.getElementById('logout-btn').addEventListener('click', function(){
   dashMapBuilt = false;
 });
 
-const profileWrap = document.getElementById('profile-btn').closest('.profile-menu-wrap');
-document.getElementById('profile-btn').addEventListener('click', function(e){
-  e.stopPropagation();
-  profileWrap.classList.toggle('open');
-});
-document.addEventListener('click', function(e){
-  if(profileWrap.classList.contains('open') && !profileWrap.contains(e.target))
-    profileWrap.classList.remove('open');
-});
-document.getElementById('profile-view-btn').addEventListener('click', function(){
-  profileWrap.classList.remove('open');
-  showToast('info','Profile', `${currentUser.name} · ${currentUser.role||'Admin'}`);
-});
-document.getElementById('profile-logout-btn').addEventListener('click', function(){
-  profileWrap.classList.remove('open');
-  document.getElementById('logout-btn').click();
-});
-document.getElementById('notif-btn').addEventListener('click', function(){
-  showToast('info','3 new alerts','High risk at Ayyanthole junction · 2 emergency vehicles dispatched.');
-});
+const profBtn = document.getElementById('profile-btn');
+const profileWrap = profBtn ? profBtn.closest('.profile-menu-wrap') : null;
+if(profBtn && profileWrap){
+  profBtn.addEventListener('click', function(e){
+    e.stopPropagation();
+    profileWrap.classList.toggle('open');
+  });
+  document.addEventListener('click', function(e){
+    if(profileWrap.classList.contains('open') && !profileWrap.contains(e.target))
+      profileWrap.classList.remove('open');
+  });
+}
+const pViewBtn = document.getElementById('profile-view-btn');
+if(pViewBtn){
+  pViewBtn.addEventListener('click', function(){
+    if(profileWrap) profileWrap.classList.remove('open');
+    showToast('info','Profile', `${currentUser.name} · ${currentUser.role||'Admin'}`);
+  });
+}
+const pLogoutBtn = document.getElementById('profile-logout-btn');
+if(pLogoutBtn){
+  pLogoutBtn.addEventListener('click', function(){
+    if(profileWrap) profileWrap.classList.remove('open');
+    const lBtn = document.getElementById('logout-btn');
+    if(lBtn) lBtn.click();
+  });
+}
+const notifBtn = document.getElementById('notif-btn');
+if(notifBtn){
+  notifBtn.addEventListener('click', function(){
+    showToast('info','Alerts','Traffic notifications active.');
+  });
+}
 
 function setDarkTheme(on){
   document.body.classList.toggle('dark-theme', on);
   const t = document.getElementById('dark-mode-toggle');
   if(t) t.checked = on;
 }
-document.getElementById('theme-btn').addEventListener('click', function(){
-  setDarkTheme(!document.body.classList.contains('dark-theme'));
-  showToast('info','Theme updated', document.body.classList.contains('dark-theme') ? 'Dark mode enabled.' : 'Light mode enabled.');
-});
+const themeBtn = document.getElementById('theme-btn');
+if(themeBtn){
+  themeBtn.addEventListener('click', function(){
+    setDarkTheme(!document.body.classList.contains('dark-theme'));
+    showToast('info','Theme updated', document.body.classList.contains('dark-theme') ? 'Dark mode enabled.' : 'Light mode enabled.');
+  });
+}
 
 /* ================================================================
    COUNTER ANIMATION
@@ -349,12 +377,15 @@ function sevColor(sev){
 }
 
 /* ================================================================
-   API HELPER
+   API HELPER — leverages api.js with fallback
    ================================================================ */
 async function apiFetch(endpoint){
   try {
-    const r = await fetch(endpoint);
-    if(!r.ok) throw new Error('HTTP '+r.status);
+    if(window.apiGet){
+      return await window.apiGet(endpoint);
+    }
+    const r = await fetch(endpoint, { cache: 'no-store' });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
     return await r.json();
   } catch(e){
     console.error('API error:', endpoint, e.message);
@@ -362,85 +393,101 @@ async function apiFetch(endpoint){
   }
 }
 
-/* ================================================================
-   INDIA ACCIDENT DENSITY MAP — Chart.js bubble chart
-   (no internet needed, no Leaflet tiles, always renders)
-   ================================================================ */
-let dashMapBuilt = false;
-
-function buildDashMap(areaData){
-  const container = document.getElementById('dash-map');
-  if(!container || dashMapBuilt) return;
-  dashMapBuilt = true;
-
-  Object.assign(container.style, {
-    background:'linear-gradient(135deg,#0B1526 0%,#0D2040 100%)',
-    position:'relative', overflow:'hidden', borderRadius:'12px'
-  });
-
-  if(!areaData || !areaData.labels) return;
-
-  const palette  = ['#F04438','#F79009','#9E77ED','#2D7CFF','#17B26A','#06AED4','#EAB308'];
-  const maxCount = Math.max(...areaData.values, 1);
-
-  // Kochi bounding box: lng 76.22–76.36, lat 9.94–10.05
-  // Map to percentage: x = (lng-76.22)/(76.36-76.22)*90+5, y = (10.05-lat)/(10.05-9.94)*80+5
-  function toPercent(lat, lng){
-    const x = Math.round((lng - 76.22) / (76.36 - 76.22) * 84 + 6);
-    const y = Math.round((10.05 - lat) / (10.05 - 9.94) * 76 + 8);
-    return {x, y};
-  }
-
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" style="position:absolute;top:0;left:0;z-index:2;">`;
-  // Grid lines
-  for(let i=1;i<5;i++){
-    svg += `<line x1="${i*20}%" y1="0" x2="${i*20}%" y2="100%" stroke="rgba(45,124,255,0.07)" stroke-width="1"/>`;
-    svg += `<line x1="0" y1="${i*20}%" x2="100%" y2="${i*20}%" stroke="rgba(45,124,255,0.07)" stroke-width="1"/>`;
-  }
-
-  areaData.labels.forEach((area, i)=>{
-    const geo   = KOCHI_AREA_GEO[area];
-    if(!geo) return;
-    const pos   = toPercent(geo.lat, geo.lng);
-    const color = palette[i % palette.length];
-    const count = areaData.values[i] || 0;
-    const r     = 14 + Math.round((count / maxCount) * 24); // 14–38px
-    // Glow
-    svg += `<circle cx="${pos.x}%" cy="${pos.y}%" r="${r*1.7}" fill="${hexAlpha(color,0.13)}"/>`;
-    // Main bubble
-    svg += `<circle cx="${pos.x}%" cy="${pos.y}%" r="${r}" fill="${hexAlpha(color,0.58)}" stroke="${color}" stroke-width="2"><title>${area}: ${count.toLocaleString('en-IN')} records</title></circle>`;
-    // Area label
-    svg += `<text x="${pos.x}%" y="${pos.y-r/20-1.5}%" text-anchor="middle" fill="white" font-size="9.5" font-family="Inter,sans-serif" font-weight="700" style="pointer-events:none;">${area}</text>`;
-    // Count
-    svg += `<text x="${pos.x}%" y="${pos.y+r/20+2.5}%" text-anchor="middle" fill="rgba(255,255,255,0.75)" font-size="8" font-family="Inter,sans-serif" style="pointer-events:none;">${count >= 1000 ? (count/1000).toFixed(1)+'k' : count}</text>`;
-  });
-  svg += `</svg>`;
-
-  const title = document.createElement('div');
-  title.style.cssText = 'position:absolute;top:10px;left:12px;color:rgba(255,255,255,0.35);font-size:10px;font-weight:700;font-family:Inter,sans-serif;letter-spacing:0.08em;z-index:3;pointer-events:none;';
-  title.textContent = 'KOCHI · ACCIDENT HOTSPOT MAP · 2022–2026';
-  container.appendChild(title);
-  container.insertAdjacentHTML('beforeend', svg);
+/* Helper returning consistent Chart.js options for the Accidents Trend line chart */
+function trendChartOptions(isMultiYear = true){
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: {
+      mode: 'index',
+      intersect: false
+    },
+    plugins: {
+      legend: {
+        display: isMultiYear,
+        position: 'top',
+        align: 'end',
+        labels: {
+          color: '#cbd5e1',
+          font: { family: "'Inter', sans-serif", size: 11.5, weight: '600' },
+          boxWidth: 10,
+          boxHeight: 10,
+          usePointStyle: true,
+          pointStyle: 'circle',
+          padding: 12
+        }
+      },
+      tooltip: {
+        backgroundColor: '#0c1b33',
+        titleColor: '#ffffff',
+        bodyColor: '#93c5fd',
+        borderColor: 'rgba(192,230,253,0.25)',
+        borderWidth: 1,
+        padding: 10,
+        boxPadding: 4,
+        callbacks: {
+          label: function(context){
+            const label = context.dataset.label || '';
+            const val = context.parsed.y;
+            return val !== null && val !== undefined
+              ? `  ${label}: ${val.toLocaleString('en-IN')} accidents`
+              : `  ${label}: No data`;
+          }
+        }
+      }
+    },
+    scales: {
+      x: {
+        grid: {
+          color: 'rgba(255, 255, 255, 0.05)',
+          borderColor: 'rgba(255, 255, 255, 0.1)'
+        },
+        ticks: {
+          color: '#94a3b8',
+          font: { family: "'Inter', sans-serif", size: 11 }
+        }
+      },
+      y: {
+        beginAtZero: true,
+        grid: {
+          color: 'rgba(255, 255, 255, 0.05)',
+          borderColor: 'rgba(255, 255, 255, 0.1)'
+        },
+        ticks: {
+          color: '#94a3b8',
+          font: { family: "'Inter', sans-serif", size: 11 },
+          callback: function(v){ return v.toLocaleString('en-IN'); }
+        }
+      }
+    }
+  };
 }
+window.trendChartOptions = trendChartOptions;
+
+/* Dash Leaflet mini-map is defined below with real hotspot markers */
 
 /* ================================================================
    DASHBOARD — initDashboardCharts(year)
-   year = '' → All 2022-2026 (5-line trend comparison)
-   year = '2022' … '2026' → Filter everything
+   year = '' → All 2022-2026 (comparison)
+   year = '2022' … '2026' → Filtered single year
    ================================================================ */
 async function initDashboardCharts(year=''){
   const q  = year ? ('?year='+year) : '';
   const q2 = year ? ('&year='+year) : '';
 
-  // Fetch in parallel: filtered stats + trend + causes + state + recent
-  const [stats, trendData, byCause, byArea, recent] = await Promise.all([
+  // Destroy existing trend chart if already registered
+  if(CHART_REGISTRY['chart-dash-trend']){
+    CHART_REGISTRY['chart-dash-trend'].destroy();
+    delete CHART_REGISTRY['chart-dash-trend'];
+  }
+
+  // Fetch in parallel: filtered stats + trend + causes + hotspots + recent (8)
+  const [stats, trendData, byCause, hotspotsData, recentRes] = await Promise.all([
     apiFetch('/api/dashboard/stats'    + q),
-    year
-      ? apiFetch('/api/dashboard/trend' + q)           // single-year monthly line
-      : apiFetch('/api/dashboard/trend_by_year'),       // 5-year comparison
+    apiFetch('/api/dashboard/trend'    + q),
     apiFetch('/api/dashboard/by_cause' + q),
-    apiFetch('/api/dashboard/by_area'),                // Kochi area map always all areas
-    apiFetch('/api/dashboard/recent?limit=4' + q2)
+    apiFetch('/api/hotspots?limit=10'),
+    apiFetch('/api/dashboard/recent?limit=8' + q2)
   ]);
 
   /* ── KPI Cards ───────────────────────────────────────────── */
@@ -459,77 +506,79 @@ async function initDashboardCharts(year=''){
       if(trend) trend.textContent = stats.fatal.toLocaleString('en-IN')+' recorded';
     }
 
-    // Card 3 – Avg Risk Score (no id, pick by index)
-    const cards = document.querySelectorAll('#page-dashboard .kpi-card');
-    if(cards[2]){
-      const v = cards[2].querySelector('.kpi-value');
-      if(v){ v.textContent = stats.avg_risk+'%'; }
-      const l = cards[2].querySelector('.kpi-label');
-      if(l) l.textContent = 'Avg Risk Score';
+    // Card 3 – Fatality Rate (R4)
+    const elFatality = document.getElementById('dash-fatality-rate');
+    if(elFatality){
+      const fRate = stats.fatality_rate !== undefined ? stats.fatality_rate : (stats.fatal_pct !== undefined ? stats.fatal_pct : ((stats.fatal / Math.max(stats.total, 1)) * 100).toFixed(1));
+      elFatality.textContent = fRate + '%';
+      const trendEl = document.getElementById('dash-fatality-trend');
+      if(trendEl) trendEl.textContent = `${stats.fatal} of ${stats.total}`;
     }
 
-    // Card 4 – Total Casualties (new #totalCasualties id)
+    // Card 4 – Total Casualties
     const el4 = document.getElementById('totalCasualties');
     if(el4){ el4.dataset.count = stats.casualties; el4.dataset.done = ''; el4.textContent = '0'; }
     const trendEl = document.getElementById('dash-casualties-trend');
-    if(trendEl) trendEl.textContent = year ? year+' data' : '2022–2024 data';
+    if(trendEl) trendEl.textContent = year ? year+' data' : '2022–2026 data';
 
     // Animate all counters on dashboard page
     animateCounters(document.getElementById('page-dashboard'));
   }
 
   /* ── Trend Chart ─────────────────────────────────────────── */
-  // Delay chart creation to ensure DOM is laid out and canvas has proper dimensions
   requestAnimationFrame(()=>{
     requestAnimationFrame(()=>{
       const cv  = document.getElementById('chart-dash-trend');
       const box = document.getElementById('trend-chart-box');
       if(!cv || !box) return;
 
-      const bw = box.offsetWidth  > 50 ? box.offsetWidth  : 560;
-      const bh = box.offsetHeight > 50 ? box.offsetHeight : 220;
-      cv.width  = bw;
-      cv.height = bh;
-      cv.style.width  = bw + 'px';
-      cv.style.height = bh + 'px';
-
       const sub = document.getElementById('trend-chart-sub');
-      const YEAR_COLORS = {2022:'#8BA7CC',2023:'#2D7CFF',2024:'#9E77ED',2025:'#17B26A',2026:'#F04438'};
+      const YEAR_COLORS = {2022:'#8BA7CC', 2023:'#2D7CFF', 2024:'#9E77ED', 2025:'#17B26A', 2026:'#F04438'};
 
       let chartObj = null;
       if(year && trendData && trendData.labels){
         if(sub) sub.textContent = year + ' Monthly Breakdown · Kochi';
+        const vals = (trendData.datasets && trendData.datasets[year]) || trendData.values || (trendData.series && trendData.series[0]?.data) || [];
         chartObj = mkChart('chart-dash-trend', {
           type:'line',
           data:{
             labels: trendData.labels,
             datasets:[{
               label: year,
-              data:  trendData.values,
-              borderColor:'#2D7CFF',
+              data:  vals,
+              borderColor: YEAR_COLORS[year] || '#2D7CFF',
               backgroundColor:'rgba(45,124,255,0.12)',
-              borderWidth:2.5, tension:0.4, fill:true,
-              pointRadius:3, pointBackgroundColor:'#2D7CFF', pointHoverRadius:6
+              borderWidth:2.5, tension:0.35, fill:true,
+              pointRadius:3, pointBackgroundColor: YEAR_COLORS[year] || '#2D7CFF', pointHoverRadius:6
             }]
           },
           options: trendChartOptions(false)
         });
-      } else if(!year && trendData && trendData.labels){
-        if(sub) sub.textContent = '2022–2026 · Monthly comparison · Kochi';
-        // Build 5 datasets
-        const datasets = ['2022','2023','2024','2025','2026'].map(yr => ({
-          label: yr,
-          data: trendData.datasets[yr]||[],
-          borderColor: YEAR_COLORS[yr]||'#2D7CFF',
-          backgroundColor: yr==='2023' ? 'rgba(45,124,255,0.10)' : 'transparent',
-          fill: yr==='2023',
-          borderWidth: yr==='2023' ? 2.5 : 2,
-          borderDash: ['2025','2026'].includes(yr) ? [5,4] : [],
-          tension: 0.4,
-          pointRadius: yr==='2023' ? 3 : 2,
-          pointBackgroundColor: YEAR_COLORS[yr]||'#2D7CFF',
-          pointHoverRadius: yr==='2023' ? 6 : 4
-        }));
+      } else if(trendData && trendData.labels){
+        if(sub) sub.textContent = 'Monthly accidents by year · Kochi (2026 to date)';
+        const years = ['2022','2023','2024','2025','2026'];
+        const datasets = years.map(yr => {
+          let yData = [];
+          if(trendData.datasets && trendData.datasets[yr]) {
+            yData = trendData.datasets[yr];
+          } else if(trendData.series) {
+            const found = trendData.series.find(s => String(s.year) === yr);
+            if(found) yData = found.data;
+          }
+          return {
+            label: yr === '2026' ? '2026 (to date)' : yr,
+            data: yData,
+            borderColor: YEAR_COLORS[yr] || '#2D7CFF',
+            backgroundColor: yr === '2024' ? 'rgba(45,124,255,0.08)' : 'transparent',
+            fill: yr === '2024',
+            borderWidth: yr === '2024' ? 2.5 : 2,
+            borderDash: ['2025','2026'].includes(yr) ? [5,4] : [],
+            tension: 0.35,
+            pointRadius: 3,
+            pointBackgroundColor: YEAR_COLORS[yr] || '#2D7CFF',
+            pointHoverRadius: 5
+          };
+        });
         chartObj = mkChart('chart-dash-trend', {
           type:'line',
           data:{ labels: trendData.labels, datasets },
@@ -540,132 +589,157 @@ async function initDashboardCharts(year=''){
     });
   });
 
-
-  /* ── Contributing Factors (from real DB causes) ──────────── */
+  /* ── Contributing Factors ────────────────────────────────── */
   if(byCause && byCause.labels && byCause.labels.length){
     renderDashFactors(byCause);
   }
 
-  /* ── Recent Accidents ────────────────────────────────────── */
-  if(recent && recent.length) renderDashRecentAccidents(recent);
-  renderDashEmergencyAlerts();
-  renderDashTrafficStatus();
+  /* ── Recent Accidents & Critical Feed ────────────────────── */
+  const records = Array.isArray(recentRes) ? recentRes : (recentRes?.records || []);
+  renderDashRecentAccidents(records);
+  renderDashCriticalFeed(records);
 
-  /* ── India map (only when no year filter so we don't confuse) */
-  buildDashMap(byArea);
+  /* ── Real Leaflet Mini-Map (R3) ──────────────────────────── */
+  buildDashMap(hotspotsData?.hotspots || []);
 }
 
-function trendChartOptions(showLegend){
-  return {
-    responsive: false,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        display: showLegend,
-        position:'top', align:'end',
-        labels:{boxWidth:10, boxHeight:10, usePointStyle:true, pointStyle:'circle', font:{size:11, weight:'600'}, padding:12}
-      },
-      tooltip:{
-        mode:'index', intersect:false,
-        callbacks:{
-          title: items => items[0].label,
-          label: item  => `  ${item.dataset.label}: ${(item.raw||0).toLocaleString('en-IN')} accidents`
-        }
-      }
-    },
-    scales:{
-      y:{grid:gridOpt(), border:{display:false}},
-      x:{grid:{display:false}, border:{display:false}}
-    },
-    interaction:{intersect:false, mode:'index'}
-  };
-}
-
-/* ── Contributing Factors renderer ── */
-function renderDashFactors(byCause){
-  const palette = ['#F04438','#F79009','#9E77ED','#2D7CFF','#17B26A'];
-  const total   = byCause.values.reduce((s,v)=>s+v, 0);
-  const el      = document.getElementById('dash-factors');
+/* ── Leaflet Mini-Map for Dashboard (R3) ───────────────────── */
+let dashMapInstance = null;
+function buildDashMap(hotspots){
+  const el = document.getElementById('dash-map');
   if(!el) return;
 
-  el.innerHTML = byCause.labels.map((lbl, i)=>{
-    const pct   = total > 0 ? Math.round(byCause.values[i]/total*100) : 0;
-    const color = palette[i] || '#5B6B8C';
-    return `
-      <div class="pbar-row">
-        <span class="flex items-center gap-8">
-          <span class="legend-swatch" style="background:${color};"></span>${lbl}
-        </span>
-        <span>${pct}%</span>
-      </div>
-      <div class="pbar-track">
-        <div class="pbar-fill" style="background:${color}; width:0; transition:width .8s ease;" data-w="${pct}%"></div>
-      </div>`;
-  }).join('');
+  if(!window.L){
+    setTimeout(()=>buildDashMap(hotspots), 200);
+    return;
+  }
 
-  // Animate bars after a frame
-  requestAnimationFrame(()=>{
-    el.querySelectorAll('.pbar-fill').forEach(f=>{
-      f.style.width = f.dataset.w;
+  if(dashMapInstance){
+    dashMapInstance.invalidateSize();
+    return;
+  }
+
+  dashMapInstance = L.map(el, {
+    zoomControl: true,
+    attributionControl: false
+  }).setView([9.985, 76.295], 11);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18
+  }).addTo(dashMapInstance);
+
+  if(hotspots && hotspots.length > 0){
+    hotspots.slice(0, 10).forEach((h, idx) => {
+      const lat = parseFloat(h.latitude || 9.98);
+      const lon = parseFloat(h.longitude || 76.29);
+      const isCritical = (h.tier === 'Critical' || (h.danger_score || 0) >= 70);
+      const color = isCritical ? '#F04438' : '#F79009';
+
+      const circle = L.circleMarker([lat, lon], {
+        radius: isCritical ? 9 : 7,
+        fillColor: color,
+        color: '#ffffff',
+        weight: 1.5,
+        opacity: 0.9,
+        fillOpacity: 0.85
+      }).addTo(dashMapInstance);
+
+      circle.bindPopup(`
+        <div style="font-size:12px;color:#0f172a;padding:4px;">
+          <strong style="color:${color};">#${idx+1} Hotspot</strong><br>
+          <b>${h.name || h.road_name}</b><br>
+          <span style="color:#64748b;">${h.area} &middot; Score: ${h.danger_score}/100</span><br>
+          <span>Accidents: ${h.total_accidents || 0} (${h.fatal_accidents || 0} Fatal)</span>
+        </div>
+      `);
     });
-  });
+  }
+
+  setTimeout(() => dashMapInstance?.invalidateSize(), 300);
 }
 
-/* ── Recent accidents feed ── */
+/* ── Top Contributing Factors on Dashboard ────────────────── */
+function renderDashFactors(byCause){
+  const el = document.getElementById('dash-factors');
+  if(!el || !byCause || !byCause.labels) return;
+  const total = (byCause.values || []).reduce((a, b) => a + b, 0) || 1;
+  el.innerHTML = byCause.labels.slice(0, 4).map((label, i) => {
+    const val = byCause.values[i] || 0;
+    const pct = Math.round((val / total) * 100);
+    const cleanLabel = (label || '').replace(/_/g, ' ');
+    return `
+      <div style="margin-bottom:8px;">
+        <div class="flex justify-between" style="font-size:12px;margin-bottom:3px;">
+          <span style="color:#ffffff;font-weight:600;">${cleanLabel}</span>
+          <span style="color:#94a3b8;">${val.toLocaleString()} (${pct}%)</span>
+        </div>
+        <div style="background:rgba(255,255,255,0.08);height:6px;border-radius:3px;overflow:hidden;">
+          <div style="background:#2D7CFF;height:100%;width:${pct}%;border-radius:3px;"></div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+/* ── Recent collisions feed (Latest 8) ─────────────────────── */
 function renderDashRecentAccidents(records){
   const el = document.getElementById('dash-recent-accidents');
   if(!el) return;
-  el.innerHTML = records.slice(0,4).map(a=>{
+
+  if(!records || records.length === 0){
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:#94a3b8;font-size:12.5px;">No recent collision records found.</div>';
+    return;
+  }
+
+  el.innerHTML = records.slice(0, 8).map(a=>{
     const location = a.road_name ? `${a.road_name}, ${a.area||a.city}` : `${a.area||a.city}, Kochi`;
+    const dateFormatted = a.occurred_at ? a.occurred_at.slice(0,16) : (a.date || 'Recent');
+    const causeClean = (a.cause || 'Unknown').replace(/_/g, ' ');
+
     return `
-    <div class="flex items-center gap-12" style="padding:11px 0; border-bottom:1px solid var(--border);">
-      <div class="kpi-icon ${sevColor(a.severity)}" style="width:36px;height:36px;border-radius:10px;">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
+    <div class="flex items-center gap-12 cursor-pointer" onclick="openViewRecordModal('${a.id || a.accident_uid}')" style="padding:9px 0; border-bottom:1px solid var(--border); transition:background .15s;" title="Click to view details">
+      <div class="kpi-icon ${sevColor(a.severity)}" style="width:34px;height:34px;border-radius:9px;flex-shrink:0;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
       </div>
       <div style="flex:1;min-width:0;">
-        <div style="font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${location}</div>
-        <div class="text-faint" style="font-size:11px;">${a.date||''} · ${(a.cause||'').replace(/_/g,' ')}</div>
+        <div style="font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#ffffff;">${location}</div>
+        <div class="text-faint" style="font-size:11px;">${dateFormatted} &middot; ${causeClean}</div>
       </div>
-      <span class="badge b-${sevColor(a.severity)}">${a.severity ? a.severity.charAt(0).toUpperCase()+a.severity.slice(1) : '—'}</span>
+      <span class="badge b-${sevColor(a.severity)}" style="font-size:11px;">${a.severity ? a.severity.charAt(0).toUpperCase()+a.severity.slice(1) : '—'}</span>
     </div>`;
   }).join('');
 }
 
-function renderDashEmergencyAlerts(){
-  const alerts = [
-    {text:'Ambulance dispatched to Edappally Toll Jn.', time:'2 min ago',  color:'red'},
-    {text:'Signal preempted at Palarivattom Bypass',   time:'8 min ago',  color:'blue'},
-    {text:'Green corridor activated — MG Road Kadavanthra', time:'15 min ago', color:'green'},
-    {text:'High risk alert — Vyttila Mobility Hub',     time:'22 min ago', color:'orange'}
-  ];
-  const el = document.getElementById('dash-emergency-alerts');
+/* ── Critical & Fatal Collisions Feed (R1, R2 replacement) ─── */
+function renderDashCriticalFeed(records){
+  const el = document.getElementById('dash-critical-feed');
   if(!el) return;
-  el.innerHTML = alerts.map(a=>`
-    <div class="flex items-center gap-12" style="padding:11px 0; border-bottom:1px solid var(--border);">
-      <div class="kpi-icon ${a.color}" style="width:36px;height:36px;border-radius:10px;">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+
+  const criticals = (records || []).filter(r => ['fatal', 'major'].includes((r.severity || '').toLowerCase()));
+
+  if(criticals.length === 0){
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:#17B26A;font-size:12.5px;">No critical or fatal incidents reported recently.</div>';
+    return;
+  }
+
+  el.innerHTML = criticals.slice(0, 6).map(c=>{
+    const isFatal = (c.severity || '').toLowerCase() === 'fatal';
+    const color = isFatal ? 'red' : 'orange';
+    const location = c.road_name ? `${c.road_name}, ${c.area}` : `${c.area}, Kochi`;
+    const casualtiesText = c.casualties ? `${c.casualties} casualties reported` : 'Casualties recorded';
+
+    return `
+    <div class="flex items-center gap-12" style="padding:10px 0; border-bottom:1px solid var(--border);">
+      <div class="kpi-icon ${color}" style="width:34px;height:34px;border-radius:9px;flex-shrink:0;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
       </div>
       <div style="flex:1;min-width:0;">
-        <div style="font-size:12.5px;font-weight:700;line-height:1.4;">${a.text}</div>
-        <div class="text-faint" style="font-size:11px;margin-top:2px;">${a.time}</div>
+        <div style="font-size:12.5px;font-weight:700;color:#ffffff;">${isFatal ? 'FATAL CRASH' : 'SEVERE COLLISION'}: ${location}</div>
+        <div class="text-faint" style="font-size:11px;">${casualtiesText} &middot; Cause: ${(c.cause||'Unknown').replace(/_/g,' ')}</div>
       </div>
-    </div>`).join('');
-}
-
-function renderDashTrafficStatus(){
-  const rows = [
-    {name:'Edappally Toll Junction', density:'High',     color:'red'},
-    {name:'MG Road Kadavanthra',     density:'Moderate', color:'orange'},
-    {name:'Marine Drive / Menaka',    density:'Low',      color:'green'},
-    {name:'Vyttila Mobility Hub',    density:'High',     color:'red'}
-  ];
-  const el = document.getElementById('dash-traffic-status');
-  if(!el) return;
-  el.innerHTML = rows.map(r=>`
-    <div class="flex items-center justify-between" style="padding:11px 0; border-bottom:1px solid var(--border);">
-      <div class="flex items-center gap-8"><span class="dot-status live"></span><span style="font-size:12.5px;font-weight:700;">${r.name}</span></div>
-      <span class="badge b-${r.color}">${r.density}</span>
-    </div>`).join('');
+      <span class="badge b-${color}" style="font-size:10.5px;">${c.severity ? c.severity.toUpperCase() : 'ALERT'}</span>
+    </div>`;
+  }).join('');
 }
 
 /* ================================================================
@@ -698,144 +772,274 @@ async function applyDashboardFilter(){
 window.applyDashboardFilter = applyDashboardFilter;
 
 /* ================================================================
-   ACCIDENT ANALYTICS — with year / severity / state filter
+   ACCIDENT ANALYTICS — with year / severity / area filter
+   Unified /api/analytics endpoint guarantees:
+   sum(by_hour) == sum(by_weekday) == kpis.total == records_count
    ================================================================ */
-async function initAnalyticsCharts(filters={}){
+let _analyticsActiveFilters = {};
+
+async function initAnalyticsCharts(filters = {}){
+  _analyticsActiveFilters = { ...filters };
   const qs = new URLSearchParams(filters).toString();
-  const q  = qs ? '?'+qs : '';
+  const q  = qs ? '?' + qs : '';
 
-  const [byHour, byWeekday, stats, recent] = await Promise.all([
-    apiFetch('/api/dashboard/by_hour'+q),
-    apiFetch('/api/dashboard/by_weekday'+q),
-    apiFetch('/api/dashboard/stats'+q),
-    apiFetch('/api/dashboard/recent?limit=12'+(qs?'&'+qs:''))
-  ]);
+  try {
+    const data = await apiFetch('/api/analytics' + q);
+    if(!data) throw new Error('No analytics data received from server');
 
-  // KPI cards
-  if(stats){
-    const vals = [stats.total, stats.fatal, stats.casualties, stats.major];
-    const lbls = ['Total Accidents','Fatal Accidents','Total Casualties','Major Accidents'];
-    document.querySelectorAll('#page-analytics .kpi-card').forEach((card, i)=>{
-      if(vals[i] === undefined) return;
-      const v = card.querySelector('.kpi-value');
-      const l = card.querySelector('.kpi-label');
-      if(v){ v.dataset.count = vals[i]; v.dataset.done=''; v.textContent='0'; }
-      if(l) l.textContent = lbls[i];
-    });
-    animateCounters(document.querySelector('#page-analytics .grid.grid-4') || document.getElementById('page-analytics'));
-    // Update badge
-    const badge = document.querySelector('#page-analytics .card-head .badge');
-    if(badge) badge.textContent = stats.total.toLocaleString('en-IN')+' records';
-  }
+    const kpis = data.kpis || { total: 0, fatal: 0, major: 0, minor: 0, casualties: 0 };
+    const hasFilters = Object.keys(filters).length > 0 && Object.values(filters).some(v => v !== '');
 
-  // Hourly bar chart (group into 2-hour buckets for readability)
-  if(byHour && byHour.values){
+    // ── Update Subtitle & Badges ─────────────────────────────
+    const subEl = document.getElementById('analytics-page-subtitle') || document.getElementById('analytics-filter-subtitle');
+    if(subEl && data.subtitle){
+      subEl.textContent = data.subtitle;
+    }
+
+    // ── Update Filter Info Line & Active Chips ───────────────
+    const infoEl = document.getElementById('analytics-filter-count');
+    if(infoEl){
+      infoEl.textContent = hasFilters
+        ? `Showing ${data.records_count.toLocaleString('en-IN')} of ${kpis.total.toLocaleString('en-IN')} accidents (filtered)`
+        : `Showing all ${kpis.total.toLocaleString('en-IN')} recorded accidents`;
+    }
+    const chipsEl = document.getElementById('analytics-active-chips');
+    if(chipsEl){
+      const chips = [];
+      if(filters.year) chips.push(`Year: ${filters.year}`);
+      if(filters.severity) chips.push(`Severity: ${filters.severity.charAt(0).toUpperCase() + filters.severity.slice(1)}`);
+      if(filters.area) chips.push(`Area: ${filters.area}`);
+      if(chips.length > 0){
+        chipsEl.innerHTML = chips.map(c => `<span class="badge b-blue" style="font-size:11px;padding:3px 10px;">${escapeHtml(c)}</span>`).join(' ');
+      } else {
+        chipsEl.innerHTML = '<span class="badge b-blue" style="font-size:11px;">All Records</span>';
+      }
+    }
+
+    // ── KPI Cards ────────────────────────────────────────────
+    const totalEl = document.getElementById('analytics-kpi-total');
+    if(totalEl){ totalEl.dataset.count = kpis.total; totalEl.dataset.done = ''; totalEl.textContent = kpis.total.toLocaleString('en-IN'); }
+    const fatalEl = document.getElementById('analytics-kpi-fatal');
+    if(fatalEl){ fatalEl.dataset.count = kpis.fatal; fatalEl.dataset.done = ''; fatalEl.textContent = kpis.fatal.toLocaleString('en-IN'); }
+    const casEl = document.getElementById('analytics-kpi-casualties');
+    if(casEl){ casEl.dataset.count = kpis.casualties; casEl.dataset.done = ''; casEl.textContent = kpis.casualties.toLocaleString('en-IN'); }
+    const majorEl = document.getElementById('analytics-kpi-major');
+    if(majorEl){ majorEl.dataset.count = kpis.major; majorEl.dataset.done = ''; majorEl.textContent = kpis.major.toLocaleString('en-IN'); }
+
+    // Update labels to reflect filter
+    const lblTotal = document.getElementById('analytics-label-total');
+    if(lblTotal) lblTotal.textContent = hasFilters ? 'Total Accidents (filtered)' : 'Total Accidents';
+    const lblFatal = document.getElementById('analytics-label-fatal');
+    if(lblFatal) lblFatal.textContent = hasFilters ? 'Fatal Accidents (filtered)' : 'Fatal Accidents';
+    const lblCas = document.getElementById('analytics-label-casualties');
+    if(lblCas) lblCas.textContent = hasFilters ? 'Total Casualties (filtered)' : 'Total Casualties';
+    const lblMajor = document.getElementById('analytics-label-major');
+    if(lblMajor) lblMajor.textContent = hasFilters ? 'Major Accidents (filtered)' : 'Major Accidents';
+
+    // Real dynamic badges (no hardcoded percentages)
+    const fatalPct = kpis.total > 0 ? ((kpis.fatal / kpis.total) * 100).toFixed(1) : '0.0';
+    const majorPct = kpis.total > 0 ? ((kpis.major / kpis.total) * 100).toFixed(1) : '0.0';
+    const trendFatal = document.getElementById('analytics-trend-fatal');
+    if(trendFatal) trendFatal.textContent = `${fatalPct}% fatal`;
+    const trendMajor = document.getElementById('analytics-trend-major');
+    if(trendMajor) trendMajor.textContent = `${majorPct}% major`;
+    const trendCas = document.getElementById('analytics-trend-casualties');
+    if(trendCas) trendCas.textContent = `${kpis.casualties.toLocaleString('en-IN')} victims`;
+    const trendTot = document.getElementById('analytics-trend-total');
+    if(trendTot) trendTot.textContent = hasFilters ? `${kpis.total.toLocaleString('en-IN')} matching` : '100% of dataset';
+
+    // ── Hourly bar chart (12 2-hour buckets) ─────────────────
+    const byHour = data.by_hour || { values: [] };
     const bucketLabels = ['12AM','2AM','4AM','6AM','8AM','10AM','12PM','2PM','4PM','6PM','8PM','10PM'];
     const bucketData   = [];
-    for(let i=0; i<24; i+=2) bucketData.push((byHour.values[i]||0)+(byHour.values[i+1]||0));
-    const peak = [4,8,9,10]; // 8AM, 4PM, 6PM, 8PM buckets
+    for(let i=0; i<24; i+=2){
+      bucketData.push((byHour.values[i]||0) + (byHour.values[i+1]||0));
+    }
+    const timeTotal = bucketData.reduce((a, b) => a + b, 0);
 
-    const ex = CHART_REGISTRY['chart-analytics-time'];
-    if(ex){
-      ex.data.datasets[0].data            = bucketData;
-      ex.data.datasets[0].backgroundColor = bucketData.map((_,i)=>peak.includes(i)?'#F04438':'#2D7CFF');
-      ex.update();
+    // Dynamically highlight top 3 buckets
+    const sortedIndices = bucketData
+      .map((val, idx) => ({ val, idx }))
+      .sort((a, b) => b.val - a.val)
+      .slice(0, 3)
+      .filter(item => item.val > 0)
+      .map(item => item.idx);
+    const timeColors = bucketData.map((_, i) => sortedIndices.includes(i) ? '#F04438' : '#2D7CFF');
+
+    const exTime = CHART_REGISTRY['chart-analytics-time'];
+    if(exTime){
+      exTime.data.datasets[0].data = bucketData;
+      exTime.data.datasets[0].backgroundColor = timeColors;
+      exTime.update();
     } else {
       mkChart('chart-analytics-time', {
-        type:'bar',
-        data:{
-          labels:bucketLabels,
-          datasets:[{
-            data:bucketData,
-            backgroundColor:bucketData.map((_,i)=>peak.includes(i)?'#F04438':'#2D7CFF'),
-            borderRadius:6, maxBarThickness:24
+        type: 'bar',
+        data: {
+          labels: bucketLabels,
+          datasets: [{
+            data: bucketData,
+            backgroundColor: timeColors,
+            borderRadius: 6,
+            maxBarThickness: 24
           }]
         },
-        options:{
-          responsive:true, maintainAspectRatio:false,
-          plugins:{
-            legend:{display:false},
-            tooltip:{callbacks:{title:i=>i[0].label+' hrs', label:i=>`  Accidents: ${i.raw.toLocaleString('en-IN')}`}}
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                title: i => i[0].label + ' hrs',
+                label: i => {
+                  const pct = timeTotal > 0 ? ((i.raw / timeTotal) * 100).toFixed(1) : '0';
+                  return `  Accidents: ${i.raw.toLocaleString('en-IN')} (${pct}%)`;
+                }
+              }
+            }
           },
-          scales:{y:{grid:gridOpt(),border:{display:false}}, x:{grid:{display:false},border:{display:false}}}
-        }
-      });
-    }
-  }
-
-  // Weekday doughnut
-  if(byWeekday && byWeekday.values){
-    const ex = CHART_REGISTRY['chart-analytics-weekday'];
-    if(ex){ ex.data.datasets[0].data = byWeekday.values; ex.update(); }
-    else {
-      mkChart('chart-analytics-weekday', {
-        type:'doughnut',
-        data:{
-          labels:byWeekday.labels||['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
-          datasets:[{
-            data:byWeekday.values,
-            backgroundColor:['#2D7CFF','#17B26A','#F79009','#F04438','#9E77ED','#06AED4','#EAB308'],
-            borderWidth:3, borderColor:'#fff'
-          }]
-        },
-        options:{
-          responsive:true, maintainAspectRatio:false, cutout:'62%',
-          plugins:{
-            legend:{display:true, position:'right', labels:{boxWidth:9,boxHeight:9,usePointStyle:true,pointStyle:'circle',padding:12,font:{size:11.5,weight:'600'}}},
-            tooltip:{callbacks:{label:item=>`  ${item.label}: ${item.raw.toLocaleString('en-IN')} accidents`}}
+          scales: {
+            y: {
+              grid: { color: 'rgba(255,255,255,0.06)' },
+              ticks: { color: '#94a3b8' }
+            },
+            x: {
+              grid: { display: false },
+              ticks: { color: '#94a3b8' }
+            }
           }
         }
       });
     }
+
+    // ── Weekday doughnut chart ───────────────────────────────
+    const byWeekday = data.by_weekday || { labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], values: [0,0,0,0,0,0,0] };
+    const wTotal = byWeekday.values.reduce((a, b) => a + b, 0);
+    const exWeekday = CHART_REGISTRY['chart-analytics-weekday'];
+    if(exWeekday){
+      exWeekday.data.labels = byWeekday.labels;
+      exWeekday.data.datasets[0].data = byWeekday.values;
+      exWeekday.update();
+    } else {
+      mkChart('chart-analytics-weekday', {
+        type: 'doughnut',
+        data: {
+          labels: byWeekday.labels,
+          datasets: [{
+            data: byWeekday.values,
+            backgroundColor: ['#2D7CFF','#17B26A','#F79009','#F04438','#9E77ED','#06AED4','#EAB308'],
+            borderWidth: 2,
+            borderColor: '#0f172a'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '62%',
+          plugins: {
+            legend: {
+              display: true,
+              position: 'right',
+              labels: {
+                color: '#cbd5e1',
+                boxWidth: 9,
+                boxHeight: 9,
+                usePointStyle: true,
+                pointStyle: 'circle',
+                padding: 10,
+                font: { family: "'Inter', sans-serif", size: 11, weight: '600' },
+                generateLabels: function(chart) {
+                  const d = chart.data;
+                  if(!d.labels.length || !d.datasets.length) return [];
+                  const ds = d.datasets[0];
+                  const sum = ds.data.reduce((a, b) => a + b, 0);
+                  return d.labels.map((lbl, i) => {
+                    const v = ds.data[i] || 0;
+                    const pct = sum > 0 ? ((v / sum) * 100).toFixed(1) : '0';
+                    return {
+                      text: `${lbl} · ${v.toLocaleString('en-IN')} (${pct}%)`,
+                      fillStyle: ds.backgroundColor[i],
+                      strokeStyle: ds.borderColor,
+                      lineWidth: ds.borderWidth,
+                      hidden: false,
+                      index: i
+                    };
+                  });
+                }
+              }
+            },
+            tooltip: {
+              callbacks: {
+                label: item => {
+                  const pct = wTotal > 0 ? ((item.raw / wTotal) * 100).toFixed(1) : '0';
+                  return `  ${item.label}: ${item.raw.toLocaleString('en-IN')} accidents (${pct}%)`;
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+
+  } catch(err){
+    console.error('[Analytics Error]', err);
+    showToast('error', 'Analytics Load Failed', err.message || 'Could not fetch analytics data.');
   }
-
-  if(recent && recent.length) renderAnalyticsTable(recent);
 }
 
-function renderAnalyticsTable(records){
-  const tbody = document.getElementById('analytics-table-body');
-  if(!tbody) return;
-  tbody.innerHTML = records.map(a=>`
-    <tr>
-      <td>${a.date||'—'} ${a.time||''}</td>
-      <td>${a.city||'—'}, ${a.state||'—'}</td>
-      <td><span class="badge b-${sevColor(a.severity)}">${a.severity?a.severity.charAt(0).toUpperCase()+a.severity.slice(1):'—'}</span></td>
-      <td>${a.vehicles||'—'}</td>
-      <td>${a.casualties||'0'}</td>
-      <td>${a.road_type?a.road_type.charAt(0).toUpperCase()+a.road_type.slice(1):'—'}</td>
-    </tr>`).join('');
-}
 
 /* ================================================================
-   ANALYTICS FILTER — called from HTML button
+   ANALYTICS FILTER CONTROLS
    ================================================================ */
 async function applyAnalyticsFilter(){
   const year     = document.getElementById('filter-year')?.value     || '';
   const severity = document.getElementById('filter-severity')?.value || '';
-  const state    = document.getElementById('filter-state')?.value    || '';
+  const area     = document.getElementById('filter-area')?.value     || '';
   const btn      = document.getElementById('analytics-filter-btn');
 
-  if(btn){ btn.disabled=true; btn.innerHTML='<span class="spinner" style="display:inline-block;"></span> Applying…'; }
+  if(btn){
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="display:inline-block;"></span> Applying…';
+  }
 
   const filters = {};
   if(year)     filters.year     = year;
   if(severity) filters.severity = severity;
-  if(state)    filters.state    = state;
+  if(area)     filters.area     = area;
 
   await initAnalyticsCharts(filters);
 
   if(btn){
     btn.disabled = false;
-    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.5V19l4 2v-8.5z"/></svg>Apply Filter';
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M22 3H2l8 9.5V19l4 2v-8.5z"/></svg>Apply Filter';
   }
 
   const parts = [];
-  if(year)     parts.push(year);
-  if(severity) parts.push(severity.charAt(0).toUpperCase()+severity.slice(1));
-  if(state)    parts.push(state);
-  showToast('success','Filter applied', parts.length ? parts.join(' · ') : 'Showing all 2022–2024 data');
+  if(year)     parts.push(`Year: ${year}`);
+  if(severity) parts.push(`Severity: ${severity.charAt(0).toUpperCase() + severity.slice(1)}`);
+  if(area)     parts.push(`Area: ${area}`);
+  showToast('success', 'Filter Applied', parts.length ? parts.join(' · ') : 'All Kochi accident records');
 }
 window.applyAnalyticsFilter = applyAnalyticsFilter;
+
+async function resetAnalyticsFilter(){
+  const yEl = document.getElementById('filter-year');
+  const sEl = document.getElementById('filter-severity');
+  const aEl = document.getElementById('filter-area');
+  if(yEl) yEl.value = '';
+  if(sEl) sEl.value = '';
+  if(aEl) aEl.value = '';
+
+  await initAnalyticsCharts({});
+  showToast('info', 'Filters Reset', 'All filters cleared.');
+}
+window.resetAnalyticsFilter = resetAnalyticsFilter;
+
+function exportAnalyticsCSV(){
+  const qs = new URLSearchParams(_analyticsActiveFilters).toString();
+  window.location.href = '/api/analytics/export' + (qs ? '?' + qs : '');
+}
+window.exportAnalyticsCSV = exportAnalyticsCSV;
 
 /* ================================================================
    DATA MANAGEMENT
@@ -845,39 +1049,392 @@ async function initDataPage(){
   renderDataTable(recent || []);
 }
 
-function renderDataTable(rows){
-  const tbody = document.getElementById('data-table-body');
-  if(!tbody) return;
-  tbody.innerHTML = rows.map(a=>`
-    <tr>
-      <td class="mono">${a.id}</td>
-      <td>${a.city||'—'}, ${a.state||'—'}</td>
-      <td class="mono">${a.date||'—'}</td>
-      <td class="mono">${a.time||'—'}</td>
-      <td>${a.weather?a.weather.charAt(0).toUpperCase()+a.weather.slice(1):'—'}</td>
-      <td><span class="badge b-${sevColor(a.severity)}">${a.severity?a.severity.charAt(0).toUpperCase()+a.severity.slice(1):'—'}</span></td>
-      <td style="font-weight:700;">${a.risk_score?(parseFloat(a.risk_score)*100).toFixed(0)+'%':'—'}</td>
-      <td><div class="table-actions">
-        <button class="icon-btn-sm" onclick="showToast('info','Record','${a.id} — ${a.city}, ${a.state}')" title="View"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/></svg></button>
-        <button class="icon-btn-sm" onclick="showToast('success','Updated','${a.id} saved.')" title="Edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
-        <button class="icon-btn-sm danger" onclick="showToast('error','Deleted','${a.id} removed (demo).')" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg></button>
-      </div></td>
-    </tr>`).join('');
+/* ================================================================
+   DATA MANAGEMENT — Full CRUD, Real API, Pagination, Import/Export
+   ================================================================ */
+const KOCHI_AREA_ROADS = {
+  "Edappally": ["Rajagiri Road", "LuLu Mall Access Road", "Konthuruthy Road", "Edappally Junction", "Edappally Toll Junction", "NH 66 Bypass", "Seaport Airport Road", "Edappally North"],
+  "Fort Kochi": ["KB Jacob Road", "Calvathy Road", "Bazaar Road", "Tower Road", "River Road", "Peter Celli Street"],
+  "Kadavanthra": ["Kadavanthra Junction", "KP Vallon Road", "Sahodaran Ayyappan Road", "Gandhinagar Road", "Subhash Chandra Bose Road"],
+  "Kakkanad": ["Seaport Airport Road", "Infopark Expressway", "Kakkanad Junction", "Vazhakkala Road", "Civil Station Road"],
+  "Mattancherry": ["Palace Road", "Jew Town Road", "Pandit Karuppan Road", "New Road", "Cheralai Road"],
+  "Palarivattom": ["Palarivattom Junction", "Palarivattom Bypass", "Pipeline Road", "Janatha Road", "St. Martin Road"],
+  "Vyttila": ["Vyttila Mobility Hub Access Road", "Vyttila Junction", "SA Road", "Subhash Bose Road", "Kaniyampuzha Road"]
+};
+
+let currentDataPage = 1;
+const DATA_PAGE_SIZE = 25;
+let dataSearchTimeout = null;
+let cachedDataRecords = [];
+
+function openModal(modalId){
+  const el = document.getElementById(modalId);
+  if(el){
+    el.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+}
+window.openModal = openModal;
+
+function closeModal(modalId){
+  const el = document.getElementById(modalId);
+  if(el){
+    el.style.display = 'none';
+    document.body.style.overflow = '';
+  }
+}
+window.closeModal = closeModal;
+
+function populateRecordRoads(area, selectedRoad=''){
+  const select = document.getElementById('rec-road-name');
+  if(!select) return;
+  const roads = KOCHI_AREA_ROADS[area] || [];
+  select.innerHTML = roads.map(r => `<option value="${r}" ${r===selectedRoad?'selected':''}>${r}</option>`).join('');
+}
+window.populateRecordRoads = populateRecordRoads;
+
+async function initDataPage(){
+  await loadDataRecords(1);
 }
 
-function filterDataTable(q){
-  apiFetch('/api/dashboard/recent?limit=50').then(rows=>{
-    if(!rows) return;
-    const lq = q.toLowerCase();
-    renderDataTable(rows.filter(r=>
-      (r.id+'').toLowerCase().includes(lq) ||
-      (r.city||'').toLowerCase().includes(lq) ||
-      (r.state||'').toLowerCase().includes(lq) ||
-      (r.cause||'').toLowerCase().includes(lq)
-    ));
+async function loadDataRecords(page=1){
+  currentDataPage = page;
+  const tbody = document.getElementById('data-table-body');
+  const countEl = document.getElementById('data-table-count');
+  if(!tbody) return;
+
+  tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:24px;color:#94a3b8;"><span class="spinner" style="display:inline-block;margin-right:8px;"></span> Loading records from database...</td></tr>';
+
+  const q = document.getElementById('data-search-input')?.value?.trim() || '';
+  const severity = document.getElementById('data-filter-severity')?.value || '';
+  const area = document.getElementById('data-filter-area')?.value || '';
+  const source = document.getElementById('data-filter-source')?.value || '';
+
+  const params = new URLSearchParams({
+    page: page,
+    page_size: DATA_PAGE_SIZE,
+    q: q,
+    severity: severity,
+    area: area,
+    source: source
   });
+
+  try {
+    const res = await apiFetch('/api/records?' + params.toString());
+    if(!res || !res.success){
+      tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:24px;color:#F04438;">Error loading records: ${res?.error || 'Database unavailable'}. <button class="btn btn-secondary" onclick="loadDataRecords(${page})" style="margin-left:8px;padding:3px 10px;font-size:11px;">Retry</button></td></tr>`;
+      return;
+    }
+
+    cachedDataRecords = res.items || [];
+    const total = res.total || 0;
+    const totalPages = res.total_pages || 1;
+
+    if(countEl){
+      const startIdx = total > 0 ? (page - 1) * DATA_PAGE_SIZE + 1 : 0;
+      const endIdx = Math.min(page * DATA_PAGE_SIZE, total);
+      countEl.textContent = `Showing ${startIdx}–${endIdx} of ${total.toLocaleString('en-IN')} records`;
+    }
+
+    if(cachedDataRecords.length === 0){
+      tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:32px;color:#94a3b8;">No records matched your search filters.</td></tr>';
+      renderDataPagination(page, totalPages, total);
+      return;
+    }
+
+    tbody.innerHTML = cachedDataRecords.map(r => {
+      const dateText = r.occurred_at ? r.occurred_at.slice(0, 16).replace('T', ' ') : '—';
+      const causeText = (r.cause || 'Unknown').replace(/_/g, ' ');
+      const srcBadge = r.data_source === 'real' ? 'b-green' : (r.data_source === 'synthetic' ? 'b-purple' : 'b-blue');
+
+      return `
+        <tr>
+          <td class="mono" style="font-weight:700;color:#93c5fd;">${r.accident_uid}</td>
+          <td class="mono" style="font-size:12px;">${dateText}</td>
+          <td>${r.area}</td>
+          <td style="font-weight:600;color:#ffffff;">${r.road_name}</td>
+          <td><span class="badge b-${sevColor(r.severity)}">${r.severity.toUpperCase()}</span></td>
+          <td style="font-size:12px;">${causeText}</td>
+          <td style="font-size:12px;text-transform:capitalize;">${r.weather}</td>
+          <td style="text-align:center;">${r.vehicles_involved}</td>
+          <td style="text-align:center;font-weight:700;color:${r.casualties>0?'#ff7675':'inherit'};">${r.casualties}</td>
+          <td><span class="badge ${srcBadge}" style="font-size:10px;">${(r.data_source||'sample').toUpperCase()}</span></td>
+          <td>
+            <div class="table-actions">
+              <button class="icon-btn-sm" onclick="openViewRecordModal('${r.accident_uid}')" title="View Details">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+              </button>
+              <button class="icon-btn-sm" onclick="openEditRecordModal('${r.accident_uid}')" title="Edit Record">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+              </button>
+              <button class="icon-btn-sm danger" onclick="deleteRecord('${r.accident_uid}')" title="Delete Record">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    renderDataPagination(page, totalPages, total);
+
+  } catch(err){
+    console.error('Error loading records:', err);
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:24px;color:#F04438;">Network error loading records. <button class="btn btn-secondary" onclick="loadDataRecords(${page})" style="margin-left:8px;padding:3px 10px;font-size:11px;">Retry</button></td></tr>`;
+  }
 }
-window.filterDataTable = filterDataTable;
+window.loadDataRecords = loadDataRecords;
+
+function renderDataPagination(page, totalPages, total){
+  const el = document.getElementById('data-pagination');
+  if(!el) return;
+
+  el.innerHTML = `
+    <div>Page <strong>${page}</strong> of <strong>${totalPages}</strong> &middot; Total <strong>${total.toLocaleString('en-IN')}</strong> entries</div>
+    <div class="page-btns">
+      <button class="page-btn" ${page <= 1 ? 'disabled' : ''} onclick="loadDataRecords(${page - 1})">Previous</button>
+      <button class="page-btn" ${page >= totalPages ? 'disabled' : ''} onclick="loadDataRecords(${page + 1})">Next</button>
+    </div>
+  `;
+}
+
+function onDataSearchInput(val){
+  clearTimeout(dataSearchTimeout);
+  dataSearchTimeout = setTimeout(() => {
+    loadDataRecords(1);
+  }, 300);
+}
+window.onDataSearchInput = onDataSearchInput;
+
+function openAddRecordModal(){
+  document.getElementById('record-form').reset();
+  document.getElementById('rec-id').value = '';
+  document.getElementById('record-modal-title').textContent = 'Add Accident Record';
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const mins = String(now.getMinutes()).padStart(2, '0');
+  document.getElementById('rec-occurred-at').value = `${year}-${month}-${day}T${hours}:${mins}`;
+
+  const area = document.getElementById('rec-area').value || 'Edappally';
+  populateRecordRoads(area);
+  openModal('record-modal');
+}
+window.openAddRecordModal = openAddRecordModal;
+
+function openEditRecordModal(id){
+  const r = cachedDataRecords.find(item => item.accident_uid === id || item.id === id);
+  if(!r) return;
+
+  document.getElementById('rec-id').value = r.accident_uid;
+  document.getElementById('record-modal-title').textContent = `Edit Record — ${r.accident_uid}`;
+
+  if(r.occurred_at){
+    document.getElementById('rec-occurred-at').value = r.occurred_at.slice(0, 16);
+  }
+  document.getElementById('rec-area').value = r.area;
+  populateRecordRoads(r.area, r.road_name);
+  document.getElementById('rec-road-type').value = r.road_type || 'urban';
+  document.getElementById('rec-severity').value = (r.severity || 'minor').toLowerCase();
+  document.getElementById('rec-cause').value = r.cause || 'overspeeding';
+  document.getElementById('rec-weather').value = r.weather || 'clear';
+  document.getElementById('rec-density').value = r.traffic_density || 'medium';
+  document.getElementById('rec-vehicles').value = r.vehicles_involved || 1;
+  document.getElementById('rec-casualties').value = r.casualties || 0;
+
+  openModal('record-modal');
+}
+window.openEditRecordModal = openEditRecordModal;
+
+async function submitRecordForm(e){
+  e.preventDefault();
+  const submitBtn = document.getElementById('rec-submit-btn');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Saving...';
+
+  const id = document.getElementById('rec-id').value;
+  const isEdit = Boolean(id);
+
+  const payload = {
+    occurred_at: document.getElementById('rec-occurred-at').value.replace('T', ' ') + ':00',
+    area: document.getElementById('rec-area').value,
+    road_name: document.getElementById('rec-road-name').value,
+    road_type: document.getElementById('rec-road-type').value,
+    severity: document.getElementById('rec-severity').value,
+    cause: document.getElementById('rec-cause').value,
+    weather: document.getElementById('rec-weather').value,
+    traffic_density: document.getElementById('rec-density').value,
+    vehicles_involved: parseInt(document.getElementById('rec-vehicles').value, 10),
+    casualties: parseInt(document.getElementById('rec-casualties').value, 10)
+  };
+
+  try {
+    const url = isEdit ? `/api/records/${id}` : '/api/records';
+    const method = isEdit ? 'PUT' : 'POST';
+
+    const res = await fetch(url, {
+      method: method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+
+    if(!res.ok || !data.success){
+      throw new Error(data.error || 'Failed to save record.');
+    }
+
+    closeModal('record-modal');
+    showToast('success', isEdit ? 'Record Updated' : 'Record Created', data.message);
+    loadDataRecords(currentDataPage);
+
+  } catch(err){
+    console.error('Save error:', err);
+    showToast('error', 'Error', err.message);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Save Record';
+  }
+}
+window.submitRecordForm = submitRecordForm;
+
+function openViewRecordModal(id){
+  const r = cachedDataRecords.find(item => item.accident_uid === id || item.id === id);
+  if(!r) return;
+
+  const titleEl = document.getElementById('record-view-title');
+  const bodyEl = document.getElementById('record-view-body');
+  if(!bodyEl) return;
+
+  if(titleEl) titleEl.textContent = `Accident Record: ${r.accident_uid}`;
+
+  bodyEl.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
+      <div style="padding:8px;background:rgba(255,255,255,0.03);border-radius:8px;">
+        <span class="text-dim">Occurred At:</span> <strong>${r.occurred_at || '—'}</strong>
+      </div>
+      <div style="padding:8px;background:rgba(255,255,255,0.03);border-radius:8px;">
+        <span class="text-dim">Severity:</span> <span class="badge b-${sevColor(r.severity)}">${(r.severity||'').toUpperCase()}</span>
+      </div>
+      <div style="padding:8px;background:rgba(255,255,255,0.03);border-radius:8px;">
+        <span class="text-dim">Location:</span> <strong>${r.road_name}, ${r.area}</strong>
+      </div>
+      <div style="padding:8px;background:rgba(255,255,255,0.03);border-radius:8px;">
+        <span class="text-dim">Coordinates:</span> <strong>${r.latitude}, ${r.longitude}</strong>
+      </div>
+      <div style="padding:8px;background:rgba(255,255,255,0.03);border-radius:8px;">
+        <span class="text-dim">Primary Cause:</span> <strong>${(r.cause||'').replace(/_/g, ' ')}</strong>
+      </div>
+      <div style="padding:8px;background:rgba(255,255,255,0.03);border-radius:8px;">
+        <span class="text-dim">Weather &amp; Traffic:</span> <strong>${r.weather} &middot; ${r.traffic_density} density</strong>
+      </div>
+      <div style="padding:8px;background:rgba(255,255,255,0.03);border-radius:8px;">
+        <span class="text-dim">Vehicles Involved:</span> <strong>${r.vehicles_involved}</strong>
+      </div>
+      <div style="padding:8px;background:rgba(255,255,255,0.03);border-radius:8px;">
+        <span class="text-dim">Casualties:</span> <strong>${r.casualties}</strong>
+      </div>
+      <div style="padding:8px;background:rgba(255,255,255,0.03);border-radius:8px;grid-column:span 2;">
+        <span class="text-dim">Data Source:</span> <span class="badge b-purple">${(r.data_source||'sample').toUpperCase()}</span>
+      </div>
+    </div>
+  `;
+
+  openModal('record-view-modal');
+}
+window.openViewRecordModal = openViewRecordModal;
+
+async function deleteRecord(id){
+  if(!confirm(`Are you sure you want to permanently delete record ${id}? This action is logged in audit trail.`)){
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/records/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if(!res.ok || !data.success){
+      throw new Error(data.error || 'Failed to delete record.');
+    }
+    showToast('success', 'Deleted', data.message);
+    loadDataRecords(currentDataPage);
+  } catch(err){
+    console.error('Delete error:', err);
+    showToast('error', 'Delete Failed', err.message);
+  }
+}
+window.deleteRecord = deleteRecord;
+
+function openImportModal(){
+  document.getElementById('import-csv-file').value = '';
+  document.getElementById('import-result-wrap').style.display = 'none';
+  openModal('record-import-modal');
+}
+window.openImportModal = openImportModal;
+
+async function submitImportCSV(){
+  const fileInput = document.getElementById('import-csv-file');
+  const btn = document.getElementById('import-submit-btn');
+  const resultWrap = document.getElementById('import-result-wrap');
+
+  if(!fileInput.files || fileInput.files.length === 0){
+    alert('Please select a CSV file to upload.');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+
+  btn.disabled = true;
+  btn.textContent = 'Importing...';
+  resultWrap.style.display = 'block';
+  resultWrap.innerHTML = '<span class="spinner" style="display:inline-block;margin-right:8px;"></span> Validating and importing rows...';
+
+  try {
+    const res = await fetch('/api/records/import', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json();
+
+    if(!res.ok || !data.success){
+      throw new Error(data.error || 'Import failed.');
+    }
+
+    resultWrap.innerHTML = `
+      <div style="color:#17B26A;font-weight:700;margin-bottom:6px;">Import Complete!</div>
+      <div style="font-size:12.5px;">
+        &bull; Accepted rows: <strong>${data.accepted}</strong><br>
+        &bull; Rejected rows: <strong>${data.rejected}</strong>
+      </div>
+      ${data.errors && data.errors.length ? `<div style="margin-top:8px;font-size:11.5px;color:#ff7675;max-height:100px;overflow:auto;">${data.errors.map(e => `Row ${e.row}: ${e.reason}`).join('<br>')}</div>` : ''}
+    `;
+
+    showToast('success', 'Import Finished', `Imported ${data.accepted} records successfully.`);
+    loadDataRecords(1);
+
+  } catch(err){
+    resultWrap.innerHTML = `<div style="color:#F04438;">Error: ${err.message}</div>`;
+    showToast('error', 'Import Failed', err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Start Import';
+  }
+}
+window.submitImportCSV = submitImportCSV;
+
+function exportDataRecords(){
+  const q = document.getElementById('data-search-input')?.value?.trim() || '';
+  const severity = document.getElementById('data-filter-severity')?.value || '';
+  const area = document.getElementById('data-filter-area')?.value || '';
+  const source = document.getElementById('data-filter-source')?.value || '';
+
+  const params = new URLSearchParams({ q, severity, area, source });
+  window.location.href = '/api/records/export?' + params.toString();
+  showToast('info', 'Export Started', 'Streaming filtered records to CSV...');
+}
+window.exportDataRecords = exportDataRecords;
 
 /* ================================================================
    SETTINGS — load from DB on page open, save back to DB
@@ -953,140 +1510,166 @@ async function saveSettings(){
 /* ================================================================
    RISK PREDICTION
    ================================================================ */
-function initRiskCharts(){
-  // Canvas dimensions are pre-set in HTML attributes (width/height).
-  // A short timeout just yields the event loop so the page is active.
-  setTimeout(() => {
+/* ================================================================
+   SEVERITY PREDICTION & EXPLAINABILITY (PB-06, Phases B1-B4)
+   ================================================================ */
+async function initRiskCharts(){
+  const area = document.getElementById('risk-area')?.value || 'Edappally';
+  const road = document.getElementById('risk-road-name')?.value || 'Rajagiri Road';
+  await loadLocationHistory(area, road);
 
-    // ── SHAP Explainability chart ────────────────────────────────
-    const shapChart = mkChart('chart-shap',{
-      type:'bar',
-      data:{
-        labels:['Weather Conditions','Speed Limit','Light Conditions','Road Surface','Junction Detail'],
-        datasets:[{
-          data:[0.42,0.31,0.25,-0.18,0.12],
-          backgroundColor:[0.42,0.31,0.25,-0.18,0.12].map(v=>v>=0?'#F04438':'#2D7CFF'),
-          borderRadius:5, barThickness:20
-        }]
-      },
-      options:{
-        indexAxis:'y', responsive:false, maintainAspectRatio:false,
-        animation:{ duration:500 },
-        scales:{
-          x:{ grid:gridOpt(), border:{display:false},
-              title:{display:true, text:'SHAP value — contribution to predicted severity',
-                     font:{size:10.5,weight:'600'}} },
-          y:{ grid:{display:false}, border:{display:false} }
-        },
-        plugins:{
-          legend:{display:false},
-          tooltip:{callbacks:{label:c=>(c.raw>=0?'↑ Increases severity: +':'↓ Decreases severity: ')+Math.abs(c.raw).toFixed(4)}}
-        }
-      }
-    });
-    if(shapChart) setTimeout(()=>shapChart.resize(), 60);
-
-    // ── Historical Risk chart ───────────────────────────────────
-    const histChart = mkChart('chart-risk-history',{
-      type:'line',
-      data:{
-        labels:['6 ago','5','4','3','2','Latest'],
-        datasets:[{data:[62,58,71,65,74,78],
-          borderColor:'#9E77ED', backgroundColor:'rgba(158,119,237,0.12)',
-          fill:true, tension:.4, borderWidth:2.5, pointRadius:3, pointBackgroundColor:'#9E77ED'}]
-      },
-      options:{
-        responsive:false, maintainAspectRatio:false,
-        scales:{
-          y:{min:0,max:100, grid:gridOpt(), border:{display:false}},
-          x:{grid:{display:false}, border:{display:false}}
-        }
-      }
-    });
-    if(histChart) setTimeout(()=>histChart.resize(), 60);
-
-  }, 50); // short yield — canvas is pre-sized in HTML
-
-  // Default placeholder recommendations (replaced after real prediction)
-  renderRiskRecommendations([]);
-  document.getElementById('predict-risk-btn').addEventListener('click', runRiskPrediction);
+  const btn = document.getElementById('predict-risk-btn');
+  if(btn && !btn.dataset.wired){
+    btn.dataset.wired = '1';
+    btn.addEventListener('click', runRiskPrediction);
+  }
 }
 
-function renderRiskFactors(data) {
+window.onRoadSelectionChanged = function(){
+  const area = document.getElementById('risk-area')?.value || 'Edappally';
+  const road = document.getElementById('risk-road-name')?.value || 'Rajagiri Road';
+  loadLocationHistory(area, road);
+};
 
-    // Find the factors container
-    const container = document.getElementById("risk-factors");
+window.onKeralaAreaChanged = function(area){
+  const roadSelect = document.getElementById('risk-road-name');
+  if(!roadSelect) return;
+  const roads = KOCHI_AREA_ROADS[area] || [];
+  roadSelect.innerHTML = roads.map(r => `<option value="${r}">${r}</option>`).join('');
+  const firstRoad = roads[0] || '';
+  loadLocationHistory(area, firstRoad);
+};
 
-    // Stop if the container does not exist
-    if (!container) return;
+/* ── Location Historical Record (Phase B2) ─────────────────── */
+async function loadLocationHistory(area, roadName){
+  const titleEl = document.getElementById('hist-record-title');
+  const statsEl = document.getElementById('hist-location-stats');
+  if(!statsEl) return;
 
-    // Clear previous factors
-    container.innerHTML = "";
+  if(titleEl) titleEl.textContent = `Historical Record — ${roadName}, ${area}`;
 
-    // Get real SHAP factors from the API
-    const factors = data?.top_factors || [];
-
-    // Show message when no factors are available
-    if (factors.length === 0) {
-        container.innerHTML = `
-            <div class="risk-factor-empty">
-                SHAP factors are not available for this prediction.
-            </div>
-        `;
-        return;
+  try {
+    const res = await apiFetch(`/api/location-history?area=${encodeURIComponent(area)}&road_name=${encodeURIComponent(roadName)}`);
+    if(!res || !res.success){
+      statsEl.innerHTML = '<div style="color:#F04438;font-size:12px;padding:8px;">Location historical data not available for this selection.</div>';
+      return;
     }
 
-    // Find the largest SHAP value for percentage scaling
-    const maxValue = Math.max(
-        ...factors.map(factor =>
-            Math.abs(Number(factor.shap_value))
-        )
-    );
+    const data = res.history || res;
 
-    // Create the table header
-    const header = document.createElement("div");
-    header.className = "risk-factor-header-row";
-    header.innerHTML = `
-        <div class="risk-col-num">#</div>
-        <div class="risk-col-feat">Feature</div>
-        <div class="risk-col-bar">Impact</div>
-        <div class="risk-col-pct">Contrib</div>
-        <div class="risk-col-eff">Effect</div>
-    `;
-    container.appendChild(header);
+    // Render 12-month mini chart
+    requestAnimationFrame(()=>{
+      const cv = document.getElementById('chart-risk-history');
+      if(!cv) return;
 
-    // Display each SHAP factor
-    factors.slice(0, 5).forEach((factor, index) => {
-        const shapValue = Number(factor.shap_value);
-        const percentage = maxValue > 0
-            ? Math.round((Math.abs(shapValue) / maxValue) * 100)
-            : 0;
-        const increases = shapValue >= 0;
-        const cleanName = (factor.feature || "").replace(/_/g, " ");
+      if(CHART_REGISTRY['chart-risk-history']){
+        CHART_REGISTRY['chart-risk-history'].destroy();
+        delete CHART_REGISTRY['chart-risk-history'];
+      }
 
-        const row = document.createElement("div");
-        row.className = "risk-factor";
+      const mLabels = Array.isArray(data.monthly_counts)
+        ? data.monthly_counts.map(m => m.month.slice(5))
+        : (data.monthly_counts?.labels || []).map(l => l.slice(5));
+      const mData = Array.isArray(data.monthly_counts)
+        ? data.monthly_counts.map(m => m.count)
+        : (data.monthly_counts?.values || []);
 
-        row.innerHTML = `
-            <div class="risk-col-num">${index + 1}</div>
-            <div class="risk-col-feat" title="${factor.feature}">${cleanName}</div>
-            <div class="risk-col-bar">
-                <div class="risk-factor-bar">
-                    <div
-                        class="risk-factor-fill ${increases ? "increase" : "decrease"}"
-                        style="width: ${percentage}%"
-                    ></div>
-                </div>
-            </div>
-            <div class="risk-col-pct">${percentage}%</div>
-            <div class="risk-col-eff">
-                <span class="risk-factor-direction ${increases ? "increase" : "decrease"}">
-                    ${increases ? "↑ Increases" : "↓ Decreases"}
-                </span>
-            </div>
-        `;
-        container.appendChild(row);
+      mkChart('chart-risk-history', {
+        type: 'bar',
+        data: {
+          labels: mLabels,
+          datasets: [{
+            label: 'Monthly Accidents',
+            data: mData,
+            backgroundColor: '#2D7CFF',
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: false,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: c => ` ${c.raw} recorded accidents` } }
+          },
+          scales: {
+            y: { grid: gridOpt(), border: { display: false } },
+            x: { grid: { display: false }, border: { display: false } }
+          }
+        }
+      });
     });
+
+    // Render Location Stats
+    const topCausesStr = (data.top_causes || []).slice(0, 3).map(c => `${(c.cause || '').replace(/_/g, ' ')} (${c.pct || 0}%)`).join(' &middot; ');
+
+    const minorInfo = data.severity_split?.minor || {count: 0, pct: 0};
+    const majorInfo = data.severity_split?.major || {count: 0, pct: 0};
+    const fatalInfo = data.severity_split?.fatal || {count: 0, pct: 0};
+
+    statsEl.innerHTML = `
+      <div style="font-size:12px;background:rgba(255,255,255,0.03);padding:10px 12px;border-radius:8px;border:1px solid rgba(192,230,253,0.12);">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+          <span style="color:#93c5fd;font-weight:700;">Hotspot Rank #${data.hotspot_rank || 1} of ${data.total_roads || 57} roads</span>
+          <span class="badge b-orange">Danger Score: ${data.danger_score || 0}/100</span>
+        </div>
+        <div style="color:#cbd5e1;margin-bottom:6px;">
+          Total Accidents: <strong>${data.total_accidents || 0}</strong> &middot;
+          Minor: <span style="color:#17B26A;">${minorInfo.count} (${minorInfo.pct}%)</span> &middot;
+          Major: <span style="color:#F79009;">${majorInfo.count} (${majorInfo.pct}%)</span> &middot;
+          Fatal: <span style="color:#F04438;">${fatalInfo.count} (${fatalInfo.pct}%)</span>
+        </div>
+        <div style="color:#94a3b8;font-size:11px;">
+          Top Collision Drivers: ${topCausesStr || 'None recorded'}
+        </div>
+      </div>
+    `;
+
+  } catch(err){
+    console.error('Location history error:', err);
+    statsEl.innerHTML = '<div style="color:#F04438;font-size:12px;">Error retrieving location record.</div>';
+  }
+}
+
+/* ── Top Contributing Factors Table (Phase B1) ─────────────── */
+function renderShapFactorsTable(features, predictedSeverity){
+  const container = document.getElementById('risk-factors');
+  if(!container) return;
+
+  if(!features || features.length === 0){
+    container.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-dim);font-size:12px;">SHAP factors not available for this prediction.</div>';
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="risk-factor-header-row">
+      <div class="risk-col-num">#</div>
+      <div class="risk-col-feat">Factor</div>
+      <div class="risk-col-pct">Share</div>
+      <div class="risk-col-eff">Effect</div>
+    </div>
+  ` + features.slice(0, 5).map((f, i) => {
+    const isSup = f.direction === 'supports';
+    const dirClass = isSup ? 'supports' : 'opposes';
+    const badgeText = isSup ? 'Supports' : 'Opposes';
+    const fillWidth = Math.min(Math.max(f.share_pct * 2, 2), 100);
+
+    return `
+      <div class="risk-factor">
+        <div class="risk-col-num">${i + 1}</div>
+        <div class="risk-col-feat" title="${escapeHtml(f.value_label)}">${escapeHtml(f.value_label)}</div>
+        <div class="risk-col-pct">${f.share_pct}%</div>
+        <div class="risk-col-eff">
+          <span class="risk-factor-direction ${dirClass}">${badgeText}</span>
+        </div>
+        <div class="risk-col-bar" title="Impact: ${f.share_pct}%">
+          <div class="risk-factor-bar">
+            <div class="risk-factor-fill ${dirClass}" style="width:${fillWidth}%;"></div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 /* ── Feature → Recommendation lookup ── */
 const SHAP_REC_MAP = {
@@ -1164,137 +1747,81 @@ function getBaseFeatureName(rawName) {
     .replace(/_[\d.]+$/, '');       // strip trailing numeric one-hot suffix
 }
 
-function renderRiskRecommendations(topFactors, customRecs){
+/* ── Defensive AI Recommendations (Phase B3) ───────────────── */
+function renderRiskRecommendations(recs){
   const el = document.getElementById('risk-recommendations');
   if(!el) return;
 
-  if (customRecs && customRecs.length > 0) {
-    el.innerHTML = customRecs.map((r, i) => `
-    <div class="card hoverable" style="padding:16px;display:flex;flex-direction:column;gap:10px;">
-      <div style="display:flex;gap:12px;align-items:flex-start;">
-        <div class="kpi-icon blue" style="width:38px;height:38px;border-radius:11px;flex-shrink:0;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5.2 3.4 9.6 8 11 4.6-1.4 8-5.8 8-11V5l-8-3Z"/></svg>
-        </div>
-        <div style="flex:1;min-width:0;">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:3px;">
-            <div style="font-size:12.5px;font-weight:700;">${i+1}. ${r.title}</div>
-            <span class="badge b-blue">${r.badge || 'Preventive Action'}</span>
-          </div>
-          <div class="text-dim" style="font-size:11.5px;line-height:1.55;">${r.desc}</div>
-        </div>
-      </div>
-    </div>`).join('');
+  if(!recs || recs.length === 0){
+    el.innerHTML = '<div style="grid-column:span 3;padding:24px;text-align:center;color:#94a3b8;">No safety alerts identified. All parameters appear within normal baseline.</div>';
     return;
   }
 
-  let recs = [];
+  el.innerHTML = recs.map((r, i) => {
+    const title = r.title || 'Safety Guideline';
+    const desc = r.description || r.desc || 'Standard road safety precaution.';
+    const prio = (r.priority || 'medium').toLowerCase();
+    const trigger = r.triggered_by ? `Triggered by: ${r.triggered_by}` : '';
 
-  if(topFactors && topFactors.length > 0){
-    const seen = new Map();
-    topFactors.forEach(f => {
-      const baseKey = getBaseFeatureName(f.feature);
-      const abs = Math.abs(Number(f.shap_value));
-      if (!seen.has(baseKey) || abs > Math.abs(Number(seen.get(baseKey).shap_value))) {
-        seen.set(baseKey, f);
-      }
-    });
+    let color = '#2D7CFF';
+    let icon = 'M12 2 4 5v6c0 5.2 3.4 9.6 8 11 4.6-1.4 8-5.8 8-11V5l-8-3Z';
+    if(prio === 'high' || prio === 'critical'){
+      color = '#F04438';
+      icon = 'M13 2 3 14h7l-1 8 10-12h-7z';
+    } else if(prio === 'medium'){
+      color = '#F79009';
+      icon = 'M12 2v2M12 20v2M4 12H2M22 12h-2';
+    }
 
-    const deduped = [...seen.values()]
-      .filter(f => Math.abs(Number(f.shap_value)) > 0)
-      .sort((a,b) => Math.abs(Number(b.shap_value)) - Math.abs(Number(a.shap_value)))
-      .slice(0, 6);
-
-    recs = deduped.map(f => {
-      const baseKey = getBaseFeatureName(f.feature);
-      const lookup =
-        SHAP_REC_MAP[baseKey] ||
-        Object.entries(SHAP_REC_MAP).find(([k]) =>
-          k.toLowerCase().includes(baseKey.toLowerCase()) ||
-          baseKey.toLowerCase().includes(k.toLowerCase())
-        )?.[1] ||
-        SHAP_REC_MAP['default'];
-
-      const shapVal  = Number(f.shap_value);
-      const increase = shapVal >= 0;
-      const badge    = increase
-        ? `<span style="font-size:10px;font-weight:700;color:#F04438;background:rgba(240,68,56,0.1);border-radius:4px;padding:1px 5px;">↑ Increases Risk</span>`
-        : `<span style="font-size:10px;font-weight:700;color:#17B26A;background:rgba(23,178,106,0.1);border-radius:4px;padding:1px 5px;">↓ Reduces Risk</span>`;
-      const shapDisplay = (shapVal >= 0 ? '+' : '') + shapVal.toFixed(4);
-      const displayName = baseKey.replace(/_/g, ' ');
-
-      return { ...lookup, badge, shapDisplay, featureName: displayName };
-    });
-  } else {
-    recs = [
-      {icon:'M13 2 3 14h7l-1 8 10-12h-7z',      title:'Reduce Speed',         desc:'Maintain safe speed limits. Excessive speed is a leading factor in collision severity.',                                    color:'red',    badge:'', shapDisplay:'', featureName:''},
-      {icon:'M12 2v2M12 20v2M4 12H2M22 12h-2',   title:'Improve Lighting',     desc:'Ensure adequate street lighting on accident-prone segments, especially at night.',                                      color:'orange', badge:'', shapDisplay:'', featureName:''},
-      {icon:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', title:'Road Maintenance', desc:'Repair surface defects and resurface deteriorated carriageways to reduce loss-of-control accidents.', color:'blue',   badge:'', shapDisplay:'', featureName:''}
-    ];
-  }
-
-  el.innerHTML = recs.map((r, i) => `
-    <div class="card hoverable" style="padding:16px;display:flex;flex-direction:column;gap:10px;">
-      <div style="display:flex;gap:12px;align-items:flex-start;">
-        <div class="kpi-icon ${r.color}" style="width:38px;height:38px;border-radius:11px;flex-shrink:0;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${r.icon}"/></svg>
-        </div>
-        <div style="flex:1;min-width:0;">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:3px;">
-            <div style="font-size:12.5px;font-weight:700;">${i+1}. ${r.title}</div>
-            ${r.badge}
+    return `
+      <div class="card hoverable" style="padding:16px;display:flex;flex-direction:column;gap:8px;background:rgba(13,34,64,0.65);">
+        <div style="display:flex;align-items:flex-start;gap:12px;">
+          <div class="kpi-icon" style="width:36px;height:36px;border-radius:10px;flex-shrink:0;background:${color}20;color:${color};display:flex;align-items:center;justify-content:center;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${icon}"/></svg>
           </div>
-          ${r.featureName ? `<div style="font-size:10.5px;font-weight:600;color:var(--text-faint);margin-bottom:4px;">Feature: <span style="color:var(--primary)">${r.featureName}</span>${r.shapDisplay ? ' · SHAP: <span style="font-family:monospace">' + r.shapDisplay + '</span>' : ''}</div>` : ''}
-          <div class="text-dim" style="font-size:11.5px;line-height:1.55;">${r.desc}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px;">
+              <span style="font-size:13px;font-weight:700;color:#ffffff;">${i+1}. ${title}</span>
+              <span class="badge" style="background:${color}25;color:${color};font-size:10px;font-weight:800;border:1px solid ${color}40;">${prio.toUpperCase()}</span>
+            </div>
+            <div style="font-size:12px;color:#cbd5e1;line-height:1.55;margin-bottom:4px;">${desc}</div>
+            ${trigger ? `<div style="font-size:10.5px;color:#93c5fd;font-weight:600;">${trigger}</div>` : ''}
+          </div>
         </div>
       </div>
-    </div>`).join('');
+    `;
+  }).join('');
 }
 
+/* ── Severity Prediction Execution ─────────────────────────── */
 async function runRiskPrediction(){
   const btn = document.getElementById('predict-risk-btn');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner" style="display:inline-block;"></span> Analyzing…';
+  btn.innerHTML = '<span class="spinner" style="display:inline-block;"></span> Analyzing Scenario…';
 
   try {
     const area = (document.getElementById('risk-area')?.value || 'Edappally').trim();
     const roadName = (document.getElementById('risk-road-name')?.value || 'Rajagiri Road').trim();
-    const dateValue = document.getElementById('risk-date')?.value || '2026-05-24';
-    const timeValue = document.getElementById('risk-time')?.value || '18:30';
     const roadType = document.getElementById('risk-road-type')?.value || 'urban';
     const lanes = Number(document.getElementById('risk-lanes')?.value || 2);
-    const trafficDensity = document.getElementById('risk-traffic-density')?.value || 'high';
-    const trafficSignal = Number(document.getElementById('risk-traffic-signal')?.value || 0);
+    const trafficDensity = document.getElementById('risk-density')?.value || 'high';
+    const trafficSignal = Number(document.getElementById('risk-signal')?.value || 0);
+    const hour = Number(document.getElementById('risk-hour')?.value || 18);
+    const dayOfWeek = document.getElementById('risk-day')?.value || 'Wednesday';
     const weather = document.getElementById('risk-weather')?.value || 'clear';
-    const visibility = document.getElementById('risk-visibility')?.value || 'high';
+    const visibility = document.getElementById('risk-visibility')?.value || 'good';
     const cause = document.getElementById('risk-cause')?.value || 'overspeeding';
     const vehiclesInvolved = Number(document.getElementById('risk-vehicles')?.value || 2);
-
-    let dayOfWeek = 'Friday';
-    if(dateValue){
-      try {
-        const d = new Date(dateValue);
-        const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-        if(!isNaN(d.getDay())) dayOfWeek = days[d.getDay()];
-      } catch(e){}
-    }
-
-    let hour = 18;
-    if(timeValue){
-      const parsedH = parseInt(timeValue.split(':')[0], 10);
-      if(!isNaN(parsedH)) hour = parsedH;
-    }
 
     const predictionData = {
       area: area,
       road_name: roadName,
-      date: dateValue,
-      time: timeValue,
-      day_of_week: dayOfWeek,
-      hour: hour,
       road_type: roadType,
       lanes: lanes,
       traffic_density: trafficDensity,
       traffic_signal: trafficSignal,
+      hour: hour,
+      day_of_week: dayOfWeek,
       weather: weather,
       visibility: visibility,
       cause: cause,
@@ -1309,141 +1836,180 @@ async function runRiskPrediction(){
 
     const result = await response.json();
     if(!response.ok || !result.success){
-      throw new Error(result.error || 'Prediction failed.');
+      throw new Error(result.error || 'Prediction calculation failed.');
     }
 
-    const severity = result.predicted_severity || 'Minor Severity';
+    const severity = result.predicted_severity || 'Minor';
     const confidence = Number(result.confidence || 0);
+    const sevIndex = Math.round(result.severity_index !== undefined ? result.severity_index : 25);
 
-    let riskLevel = 'Low';
     let riskColor = '#17B26A';
     let riskClass = 'b-green';
-
-    if(severity.includes('Major') || severity.includes('Serious')){
-      riskLevel = 'Moderate';
+    if(severity.toLowerCase() === 'major'){
       riskColor = '#F79009';
       riskClass = 'b-orange';
-    }
-
-    if(severity.includes('Fatal')){
-      riskLevel = 'High';
+    } else if(severity.toLowerCase() === 'fatal'){
       riskColor = '#F04438';
       riskClass = 'b-red';
     }
 
+    // 1. Update Severity Index Gauge (0–100)
     const gauge = document.getElementById('risk-gauge-fill');
     if(gauge){
       gauge.setAttribute('stroke', riskColor);
-      gauge.style.strokeDashoffset = 283 - (283 * confidence / 100);
+      gauge.style.strokeDashoffset = 283 - (283 * sevIndex / 100);
     }
-
     const gaugePct = document.getElementById('risk-gauge-pct');
     if(gaugePct){
-      gaugePct.textContent = Math.round(confidence) + '%';
+      gaugePct.textContent = sevIndex;
       gaugePct.style.color = riskColor;
     }
-
     const gaugeLabel = document.getElementById('risk-gauge-label');
     if(gaugeLabel){
       gaugeLabel.className = 'glabel badge ' + riskClass;
-      gaugeLabel.textContent = severity;
+      gaugeLabel.textContent = `Severity Index: ${sevIndex}/100`;
     }
-
     const gaugeDesc = document.getElementById('risk-gauge-desc');
     if(gaugeDesc){
-      gaugeDesc.textContent =
-        `Predicted severity: ${severity} (${area}, ${roadName}). Model confidence: ${confidence.toFixed(2)}%.`;
+      gaugeDesc.textContent = `Predicted class: ${severity.toUpperCase()} (${roadName}, ${area}). Model probability: ${confidence.toFixed(1)}%.`;
     }
 
-    const confidenceEl = document.getElementById('risk-confidence');
-    if(confidenceEl){
-      confidenceEl.textContent = confidence.toFixed(2) + '%';
+    // 2. Update 3 Probability Bars (Minor / Major / Fatal)
+    const probs = result.probabilities || { minor: 70, major: 25, fatal: 5 };
+    const pMinor = Number(probs.minor || 0);
+    const pMajor = Number(probs.major || 0);
+    const pFatal = Number(probs.fatal || 0);
+
+    const valMinor = document.getElementById('prob-minor-val');
+    const barMinor = document.getElementById('prob-minor-bar');
+    if(valMinor) valMinor.textContent = pMinor.toFixed(1) + '%';
+    if(barMinor) barMinor.style.width = pMinor + '%';
+
+    const valMajor = document.getElementById('prob-major-val');
+    const barMajor = document.getElementById('prob-major-bar');
+    if(valMajor) valMajor.textContent = pMajor.toFixed(1) + '%';
+    if(barMajor) barMajor.style.width = pMajor + '%';
+
+    const valFatal = document.getElementById('prob-fatal-val');
+    const barFatal = document.getElementById('prob-fatal-bar');
+    if(valFatal) valFatal.textContent = pFatal.toFixed(1) + '%';
+    if(barFatal) barFatal.style.width = pFatal + '%';
+
+    // 3. Update Prediction Details
+    const confEl = document.getElementById('risk-confidence');
+    if(confEl) confEl.textContent = confidence.toFixed(1) + '%';
+
+    const statusBadge = document.getElementById('risk-status-badge');
+    if(statusBadge){
+      statusBadge.className = 'badge ' + riskClass;
+      statusBadge.textContent = `${severity.toUpperCase()} CONFIRMED`;
     }
 
-    const predictionTime = document.getElementById('risk-pred-time');
-    if(predictionTime){
+    const timeEl = document.getElementById('risk-pred-time');
+    if(timeEl){
       const now = new Date();
-      predictionTime.textContent =
-        now.toLocaleDateString('en-IN') + ', ' +
-        now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+      timeEl.textContent = now.toLocaleDateString('en-IN') + ', ' + now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
     }
 
-    // Update the real-time SHAP explainability chart with actual prediction values
-    if (result.top_factors && result.top_factors.length > 0) {
-      renderRiskFactors(result);
-
-      const shapLabels = result.top_factors.map(f => (f.feature || '').replace(/_/g, ' '));
-      const shapValues = result.top_factors.map(f => parseFloat(f.shap_value));
-      const shapColors = shapValues.map(v => v >= 0 ? '#F04438' : '#2D7CFF');
-
-      const existingShap = CHART_REGISTRY['chart-shap'];
-      if (existingShap) {
-        existingShap.data.labels = shapLabels;
-        existingShap.data.datasets[0].data = shapValues;
-        existingShap.data.datasets[0].backgroundColor = shapColors;
-        existingShap.update('active');
-      } else {
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          mkChart('chart-shap', {
-            type: 'bar',
-            data: {
-              labels: shapLabels,
-              datasets: [{ data: shapValues, backgroundColor: shapColors, borderRadius: 5, barThickness: 20 }]
-            },
-            options: {
-              indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation: { duration: 600 },
-              scales: {
-                x: { grid: gridOpt(), border: { display: false }, title: { display: true, text: 'SHAP value — contribution to predicted severity', font: { size: 10.5, weight: '600' } } },
-                y: { grid: { display: false }, border: { display: false } }
-              },
-              plugins: {
-                legend: { display: false },
-                tooltip: { callbacks: { label: c => (c.raw >= 0 ? '↑ Increases severity: +' : '↓ Decreases severity: ') + Math.abs(c.raw).toFixed(4) } }
-              }
-            }
-          });
-        }));
-      }
-
-      renderRiskRecommendations(result.top_factors, result.recommendations);
+    // 4. Update SHAP Chart & Top Contributing Factors Table
+    const shapData = result.shap;
+    if(shapData && shapData.features && shapData.features.length > 0){
+      renderShapChart(shapData, severity, confidence);
+      renderShapFactorsTable(shapData.features, severity);
     }
 
-    showToast(
-      'success',
-      'Prediction Complete',
-      `${severity} predicted with ${confidence.toFixed(2)}% confidence for ${area}.`
-    );
+    // 5. Update AI Recommendations
+    renderRiskRecommendations(result.recommendations || []);
+
+    // 6. Reload Location Historical Record
+    loadLocationHistory(area, roadName);
+
+    showToast('success', 'Inference Complete', `${severity} predicted (${confidence.toFixed(1)}%) for ${roadName}.`);
 
   } catch(error){
-
-    // # Show prediction error
     console.error('Severity prediction error:', error);
-
-    showToast(
-      'error',
-      'Prediction failed',
-      error.message || 'Unable to connect to the prediction service.'
-    );
-
-  } finally{
-
-    // # Restore prediction button
+    showToast('error', 'Prediction Failed', error.message || 'Unable to execute inference.');
+  } finally {
     btn.disabled = false;
-
     btn.innerHTML = `
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M13 2 3 14h7l-1 8 10-12h-7z"/>
       </svg>
       Predict Severity
     `;
   }
+}
+
+/* ── SHAP Horizontal Diverging Bar Chart (Phase B1) ────────── */
+function renderShapChart(shapData, predictedSeverity, confidence){
+  const features = (shapData.features || []).slice(0, 8);
+  const labels = features.map(f => f.value_label || f.feature);
+  const values = features.map(f => parseFloat(f.shap_value));
+  const colors = features.map(f => f.direction === 'supports' ? '#17B26A' : '#F04438');
+
+  // Auto-summary above chart
+  const summaryEl = document.getElementById('shap-auto-summary');
+  if(summaryEl){
+    const supporting = features.filter(f => f.direction === 'supports').slice(0, 2).map(f => f.value_label);
+    const opposing = features.filter(f => f.direction === 'opposes').slice(0, 1).map(f => f.value_label);
+    const supText = supporting.length ? supporting.join(', ') : 'Standard road baseline';
+    const oppText = opposing.length ? opposing.join(', ') : 'None';
+    summaryEl.innerHTML = `Predicted <strong>${predictedSeverity}</strong> (${confidence.toFixed(1)}%). Main drivers: <span style="color:#17B26A;">${supText}</span>; main opposing: <span style="color:#F04438;">${oppText}</span>.`;
+  }
+
+  // Subtitle
+  const subEl = document.getElementById('shap-card-sub');
+  if(subEl) subEl.textContent = `Feature contribution to predicted severity: ${predictedSeverity}`;
+
+  if(CHART_REGISTRY['chart-shap']){
+    CHART_REGISTRY['chart-shap'].destroy();
+    delete CHART_REGISTRY['chart-shap'];
+  }
+
+  requestAnimationFrame(() => {
+    mkChart('chart-shap', {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: values,
+          backgroundColor: colors,
+          borderRadius: 4,
+          barThickness: 16
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (c) => {
+                const item = features[c.dataIndex];
+                const sign = item.shap_value >= 0 ? '+' : '';
+                const dirLabel = item.direction === 'supports' ? 'Supports' : 'Opposes';
+                return ` ${dirLabel} predicted severity: ${sign}${item.shap_value.toFixed(4)} (${item.share_pct}% share)`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: gridOpt(),
+            border: { display: false },
+            title: { display: true, text: `SHAP Value &middot; Class: ${predictedSeverity}`, font: { size: 11, weight: '600' }, color: '#93c5fd' }
+          },
+          y: {
+            grid: { display: false },
+            border: { display: false },
+            ticks: { font: { size: 11, weight: '600' }, color: '#cbd5e1' }
+          }
+        }
+      }
+    });
+  });
 }
 
 /* ================================================================
@@ -1912,18 +2478,264 @@ async function initEmergencyPage(){
    REPORTS
    ================================================================ */
 async function initReportsCharts(){
-  const trend = await apiFetch('/api/dashboard/trend');
-  if(trend && trend.labels){
-    const last6Labels = trend.labels.slice(-6);
-    const last6Values = trend.values.slice(-6);
-    mkChart('chart-reports-accidents',{type:'line',data:{labels:last6Labels,datasets:[{data:last6Values,borderColor:'#2D7CFF',backgroundColor:'rgba(45,124,255,0.1)',fill:true,tension:.4,borderWidth:2.5,pointRadius:3,pointBackgroundColor:'#2D7CFF'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{tooltip:{callbacks:{label:i=>`  Accidents: ${i.raw.toLocaleString('en-IN')}`}}},scales:{y:{grid:gridOpt(),border:{display:false}},x:{grid:{display:false},border:{display:false}}}}});
-  } else {
-    mkChart('chart-reports-accidents',{type:'line',data:{labels:['Dec','Jan','Feb','Mar','Apr','May'],datasets:[{data:[210,198,225,240,215,260],borderColor:'#2D7CFF',backgroundColor:'rgba(45,124,255,0.1)',fill:true,tension:.4,borderWidth:2.5,pointRadius:3,pointBackgroundColor:'#2D7CFF'}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{grid:gridOpt(),border:{display:false}},x:{grid:{display:false},border:{display:false}}}}});
-  }
-  mkChart('chart-reports-hotspots',{type:'bar',data:{labels:['Dec','Jan','Feb','Mar','Apr','May'],datasets:[{label:'Very High',data:[4,4,5,5,6,5],backgroundColor:'#F04438',borderRadius:4,maxBarThickness:14,stack:'s'},{label:'High',data:[6,7,7,8,7,8],backgroundColor:'#F79009',borderRadius:4,maxBarThickness:14,stack:'s'},{label:'Moderate',data:[5,6,6,5,6,6],backgroundColor:'#EAB308',borderRadius:4,maxBarThickness:14,stack:'s'}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{grid:gridOpt(),border:{display:false},stacked:true},x:{grid:{display:false},border:{display:false},stacked:true}},plugins:{legend:{display:true,position:'bottom',labels:{boxWidth:8,boxHeight:8,usePointStyle:true,pointStyle:'circle',font:{size:10.5,weight:'600'}}}}}});
-  const el=document.getElementById('reports-table');
-  if(el) el.innerHTML=[{name:'Monthly Accident Summary — Jan 2024',by:'System',date:'31 Jan 2024',status:'Ready'},{name:'Hotspot Analysis Report — 2023',by:'Admin',date:'01 Jan 2024',status:'Ready'},{name:'Traffic Signal Optimization Report',by:'System',date:'15 Dec 2023',status:'Ready'},{name:'Emergency Response Performance',by:'Admin',date:'01 Dec 2023',status:'Processing'},{name:'Risk Prediction Accuracy Report',by:'System',date:'01 Nov 2023',status:'Ready'},{name:'Annual Incident Log — 2022',by:'Admin',date:'31 Dec 2022',status:'Ready'}].map(r=>`<tr><td style="font-weight:700;">${r.name}</td><td>${r.by}</td><td>${r.date}</td><td><span class="badge ${r.status==='Ready'?'b-green':'b-orange'}">${r.status}</span></td><td><div class="table-actions"><button class="icon-btn-sm" onclick="showToast('info','Report','${r.name}')" title="View"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/></svg></button><button class="icon-btn-sm" onclick="showToast('success','Download','${r.name}.pdf')" title="PDF"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></button></div></td></tr>`).join('');
+  await Promise.all([
+    loadReportsStats(),
+    loadReportsTrends(),
+    loadReportsTable()
+  ]);
 }
+window.initReportsCharts = initReportsCharts;
+
+async function loadReportsStats(){
+  try {
+    const stats = await apiFetch('/api/reports/stats');
+    if(!stats) return;
+    const tEl = document.getElementById('reports-stat-today');
+    if(tEl) tEl.textContent = stats.today_reports !== undefined ? stats.today_reports : 0;
+    const mEl = document.getElementById('reports-stat-month');
+    if(mEl) mEl.textContent = stats.month_reports !== undefined ? stats.month_reports : 0;
+    const dEl = document.getElementById('reports-stat-downloads');
+    if(dEl) dEl.textContent = stats.total_downloads !== undefined ? stats.total_downloads : 0;
+  } catch(e) {
+    console.error('Failed to load report stats:', e);
+  }
+}
+window.loadReportsStats = loadReportsStats;
+
+async function loadReportsTrends(){
+  try {
+    const trends = await apiFetch('/api/reports/trends');
+    if(!trends) return;
+
+    // Accident Trends: 6-month summary
+    if(trends.accident_trends && trends.accident_trends.labels){
+      mkChart('chart-reports-accidents', {
+        type: 'line',
+        data: {
+          labels: trends.accident_trends.labels,
+          datasets: [{
+            label: 'Accidents',
+            data: trends.accident_trends.values,
+            borderColor: '#2D7CFF',
+            backgroundColor: 'rgba(45,124,255,0.12)',
+            fill: true,
+            tension: 0.35,
+            borderWidth: 2.5,
+            pointRadius: 4,
+            pointBackgroundColor: '#2D7CFF'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: i => ` Accidents: ${i.raw.toLocaleString('en-IN')}` } }
+          },
+          scales: {
+            y: { grid: gridOpt(), border: { display: false } },
+            x: { grid: { display: false }, border: { display: false } }
+          }
+        }
+      });
+    }
+
+    // Hotspot Trends: Risk zone evolution (top 5 areas)
+    if(trends.hotspot_trends && trends.hotspot_trends.labels && trends.hotspot_trends.datasets){
+      const datasets = trends.hotspot_trends.datasets.map(ds => ({
+        label: ds.label,
+        data: ds.data,
+        backgroundColor: ds.backgroundColor,
+        borderRadius: 4,
+        maxBarThickness: 16
+      }));
+
+      mkChart('chart-reports-hotspots', {
+        type: 'bar',
+        data: {
+          labels: trends.hotspot_trends.labels,
+          datasets: datasets
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: { grid: gridOpt(), border: { display: false }, stacked: true },
+            x: { grid: { display: false }, border: { display: false }, stacked: true }
+          },
+          plugins: {
+            legend: {
+              display: true,
+              position: 'bottom',
+              labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'circle', font: { size: 10.5, weight: '600' } }
+            }
+          }
+        }
+      });
+    }
+  } catch(e) {
+    console.error('Failed to load report trends:', e);
+  }
+}
+window.loadReportsTrends = loadReportsTrends;
+
+async function loadReportsTable(){
+  const el = document.getElementById('reports-table');
+  if(!el) return;
+  try {
+    const res = await apiFetch('/api/reports');
+    if(!res || !res.reports || res.reports.length === 0){
+      el.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:#94a3b8;">No reports generated yet. Click "Generate New Report" to create an audit report.</td></tr>';
+      return;
+    }
+
+    el.innerHTML = res.reports.map(r => {
+      let format = 'PDF';
+      if(r.type && r.type.includes('csv')) format = 'CSV';
+      else if(r.file_path && r.file_path.endsWith('.csv')) format = 'CSV';
+      else if(r.params_json){
+        try { const p = JSON.parse(r.params_json); if(p.format === 'csv') format = 'CSV'; }catch(e){}
+      }
+
+      const sizeKb = r.file_size ? (r.file_size / 1024).toFixed(1) + ' KB' : '—';
+      const dateStr = r.created_at ? r.created_at.slice(0, 16) : '—';
+      const statusClass = (r.status || 'Ready').toLowerCase() === 'ready' ? 'b-green' : 'b-orange';
+
+      return `
+        <tr>
+          <td style="font-weight:700;color:#ffffff;">${escapeHtml(r.name || 'Safety Report')}</td>
+          <td><span class="badge ${format === 'PDF' ? 'b-purple' : 'b-blue'}">${format}</span></td>
+          <td>${escapeHtml(r.generated_by || 'Admin')}</td>
+          <td class="text-faint">${dateStr}</td>
+          <td class="mono">${sizeKb}</td>
+          <td>${r.download_count || 0}</td>
+          <td><span class="badge ${statusClass}">${escapeHtml(r.status || 'Ready')}</span></td>
+          <td>
+            <div class="table-actions">
+              <button class="icon-btn-sm" onclick="previewReport(${r.id})" title="Preview in browser">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+              </button>
+              <button class="icon-btn-sm" onclick="downloadReport(${r.id})" title="Download">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15l3 3 3-3"/></svg>
+              </button>
+              <button class="icon-btn-sm" onclick="deleteReport(${r.id})" title="Delete" style="color:#f87171;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  } catch(e) {
+    console.error('Failed to load reports table:', e);
+    el.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:#f87171;">Failed to load reports. <button class="btn btn-secondary btn-sm" onclick="loadReportsTable()">Retry</button></td></tr>';
+  }
+}
+window.loadReportsTable = loadReportsTable;
+
+function openReportModal(){
+  const f = document.getElementById('report-gen-form');
+  if(f) f.reset();
+  const now = new Date();
+  const dTo = now.toISOString().slice(0, 10);
+  const dFrom = new Date(now.getFullYear(), 0, 1).toISOString().slice(0, 10);
+  const fromEl = document.getElementById('rep-gen-date-from');
+  const toEl = document.getElementById('rep-gen-date-to');
+  if(fromEl && !fromEl.value) fromEl.value = dFrom;
+  if(toEl && !toEl.value) toEl.value = dTo;
+  openModal('report-generate-modal');
+}
+window.openReportModal = openReportModal;
+
+async function submitGenerateReport(e){
+  e.preventDefault();
+  const btn = document.getElementById('rep-gen-submit-btn');
+  const origHtml = btn ? btn.innerHTML : '';
+  if(btn){
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Generating...';
+  }
+
+  const payload = {
+    type: document.getElementById('rep-gen-type')?.value || 'monthly_summary',
+    date_from: document.getElementById('rep-gen-date-from')?.value || '',
+    date_to: document.getElementById('rep-gen-date-to')?.value || '',
+    area: document.getElementById('rep-gen-area')?.value || '',
+    format: document.getElementById('rep-gen-format')?.value || 'pdf'
+  };
+
+  try {
+    const res = await fetch('/api/reports/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if(res.ok && data.success){
+      showToast('success', 'Report Generated', data.report?.name || 'Report successfully created.');
+      closeModal('report-generate-modal');
+      await Promise.all([loadReportsStats(), loadReportsTable()]);
+    } else {
+      showToast('error', 'Generation Failed', data.error || 'Server could not generate report');
+    }
+  } catch(err){
+    console.error('Error generating report:', err);
+    showToast('error', 'Network Error', 'Could not reach server to generate report');
+  } finally {
+    if(btn){
+      btn.disabled = false;
+      btn.innerHTML = origHtml;
+    }
+  }
+}
+window.submitGenerateReport = submitGenerateReport;
+
+async function previewReport(id){
+  try {
+    const res = await apiFetch(`/api/reports/${id}/preview`);
+    if(res && res.html){
+      const titleEl = document.getElementById('preview-modal-title');
+      const bodyEl = document.getElementById('preview-modal-body');
+      if(titleEl) titleEl.textContent = res.report_name || 'Report Preview';
+      if(bodyEl) bodyEl.innerHTML = res.html;
+      openModal('report-preview-modal');
+    } else {
+      showToast('error', 'Preview Error', res?.error || 'Could not load preview');
+    }
+  } catch(e){
+    console.error('Preview error:', e);
+    showToast('error', 'Error', 'Failed to preview report');
+  }
+}
+window.previewReport = previewReport;
+
+function downloadReport(id){
+  window.open(`/api/reports/${id}/download`, '_blank');
+  setTimeout(() => {
+    loadReportsStats();
+    loadReportsTable();
+  }, 1200);
+}
+window.downloadReport = downloadReport;
+
+async function deleteReport(id){
+  if(!confirm('Are you sure you want to delete this report? This cannot be undone.')) return;
+  try {
+    const res = await fetch(`/api/reports/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if(res.ok && data.success){
+      showToast('success', 'Deleted', 'Report removed successfully.');
+      await Promise.all([loadReportsStats(), loadReportsTable()]);
+    } else {
+      showToast('error', 'Delete Failed', data.error || 'Could not delete report');
+    }
+  } catch(e){
+    console.error('Delete error:', e);
+    showToast('error', 'Error', 'Failed to delete report');
+  }
+}
+window.deleteReport = deleteReport;
+
 
 /* ================================================================
    ROAD SCENE — YOLOv8 illustration
@@ -1947,30 +2759,45 @@ function buildRoadSceneInto(containerId, vehicles, keepLiveBadge){
 }
 
 /* ================================================================
-   YOLO VEHICLE DETECTION & COUNT
-   Modelled after: github.com/RayanAIX/vehicle-detection-and-counting-yolov8
-   Backend uses results[0].plot() annotation + per-frame vehicle count overlay
-   + saves annotated output video downloadable as output.mp4
+   YOLO VEHICLE DETECTION & COUNT (Robust Async Jobs + ByteTrack)
    ================================================================ */
 
 let _yoloFile = null;
+let _currentYoloJobId = null;
+let _yoloPollTimer = null;
 
-function initYoloCharts(){
-  buildRoadSceneInto('yolo-detect-stage', yoloVehicles(), true);
+async function initYoloCharts(){
+  // Fetch real model info dynamically from backend
+  try {
+    const info = await apiFetch('/api/yolo/info');
+    if(info){
+      const badgeText = document.getElementById('yolo-model-badge-text');
+      if(badgeText) badgeText.textContent = `${info.model_name || 'YOLOv8s'} · ${info.weights_loaded ? 'Online' : 'Standby'}`;
+      const infoModel = document.getElementById('yolo-info-model');
+      if(infoModel) infoModel.textContent = info.model_name || 'YOLOv8s (Enhanced)';
+      const infoDevice = document.getElementById('yolo-info-device');
+      if(infoDevice) infoDevice.textContent = info.device || 'CPU';
+      const infoTracker = document.getElementById('yolo-info-tracker');
+      if(infoTracker) infoTracker.textContent = info.tracker || 'ByteTrack Multi-Object';
+      const infoClasses = document.getElementById('yolo-info-classes');
+      if(infoClasses && info.classes) infoClasses.textContent = info.classes.join(', ');
+      const infoStatus = document.getElementById('yolo-info-status');
+      if(infoStatus){
+        infoStatus.innerHTML = info.weights_loaded
+          ? '<span class="dot-status live"></span>Online'
+          : '<span class="dot-status"></span>Standby';
+      }
+    }
+  } catch(e){
+    console.warn('[YOLO Info Error]', e);
+  }
 }
 window.initYoloCharts = initYoloCharts;
 
 function onYoloFileSelected(input){
   const file = input.files && input.files[0];
   if(!file) return;
-  _yoloFile = file;
-  const nameEl = document.getElementById('yolo-file-name');
-  if(nameEl) nameEl.textContent = file.name;
-  const btn = document.getElementById('yolo-detect-btn');
-  if(btn) btn.disabled = false;
-  const dlBtn = document.getElementById('yolo-download-btn');
-  if(dlBtn) dlBtn.style.display = 'none';
-  showToast('success', 'File loaded', file.name + ' ready for detection.');
+  setYoloFile(file);
 }
 window.onYoloFileSelected = onYoloFileSelected;
 
@@ -1978,156 +2805,119 @@ function handleYoloDrop(e){
   e.preventDefault();
   const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
   if(!file) return;
+  setYoloFile(file);
+}
+window.handleYoloDrop = handleYoloDrop;
+
+function setYoloFile(file){
+  // Client-side validation: 200 MB maximum
+  const maxBytes = 200 * 1024 * 1024;
+  if(file.size > maxBytes){
+    showToast('error', 'File Too Large', `Selected file is ${(file.size / (1024 * 1024)).toFixed(1)} MB. Maximum allowed is 200 MB.`);
+    return;
+  }
   _yoloFile = file;
   const nameEl = document.getElementById('yolo-file-name');
-  if(nameEl) nameEl.textContent = file.name;
+  if(nameEl) nameEl.textContent = `${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MB)`;
   const btn = document.getElementById('yolo-detect-btn');
   if(btn) btn.disabled = false;
   const dlBtn = document.getElementById('yolo-download-btn');
   if(dlBtn) dlBtn.style.display = 'none';
-  showToast('success', 'File dropped', file.name + ' ready.');
+
+  // Reset any error box
+  const errWrap = document.getElementById('yolo-error-wrap');
+  if(errWrap) errWrap.style.display = 'none';
+  const statusEl = document.getElementById('yolo-kpi-status');
+  if(statusEl){ statusEl.textContent = 'Ready'; statusEl.style.color = 'var(--green)'; }
+
+  // Update empty state text
+  const stageTitle = document.getElementById('yolo-stage-title');
+  if(stageTitle) stageTitle.textContent = `${file.name} Selected`;
+  const stageSub = document.getElementById('yolo-stage-sub');
+  if(stageSub) stageSub.textContent = `Click "Run YOLOv8 Detection" to process with YOLOv8s + ByteTrack`;
+
+  showToast('info', 'File Selected', `${file.name} is ready for detection.`);
 }
-window.handleYoloDrop = handleYoloDrop;
 
 async function runYoloDetection(){
   if(!_yoloFile){
-    showToast('error', 'No file', 'Please select a video or image first.');
+    showToast('error', 'No file', 'Please select a traffic video or image first.');
     return;
   }
+
   const btn     = document.getElementById('yolo-detect-btn');
   const btnText = document.getElementById('yolo-detect-btn-text');
   const spinner = document.getElementById('yolo-spinner');
   btn.disabled  = true;
-  btnText.textContent = 'Detecting…';
+  btnText.textContent = 'Uploading…';
   spinner.style.display = 'inline-block';
 
   const dlBtn = document.getElementById('yolo-download-btn');
   if(dlBtn) dlBtn.style.display = 'none';
 
   const statusEl = document.getElementById('yolo-kpi-status');
-  if(statusEl){ statusEl.textContent = 'Processing…'; statusEl.style.color = 'var(--orange)'; }
+  if(statusEl){ statusEl.textContent = 'Uploading…'; statusEl.style.color = 'var(--blue)'; }
+
+  const errWrap = document.getElementById('yolo-error-wrap');
+  if(errWrap) errWrap.style.display = 'none';
+
+  const progWrap = document.getElementById('yolo-progress-wrap');
+  const progBar  = document.getElementById('yolo-progress-bar');
+  const progPct  = document.getElementById('yolo-progress-pct');
+  const progLbl  = document.getElementById('yolo-progress-label');
+  const progDet  = document.getElementById('yolo-progress-detail');
+  if(progWrap){
+    progWrap.style.display = 'block';
+    progBar.style.width = '0%';
+    progPct.textContent = '0%';
+    progLbl.textContent = 'Uploading media to server...';
+    progDet.textContent = 'Starting upload stream';
+  }
 
   try {
     const formData = new FormData();
     formData.append('video', _yoloFile);
-    // Confidence threshold — matches reference repo Streamlit sidebar slider
     const confSlider = document.getElementById('yolo-conf-slider');
-    const confVal = confSlider ? parseFloat(confSlider.value).toFixed(2) : '0.40';
+    const confVal = confSlider ? parseFloat(confSlider.value).toFixed(2) : '0.35';
     formData.append('conf', confVal);
 
-    const res  = await fetch('/api/yolo/detect', { method: 'POST', body: formData });
-    const data = await res.json();
-    if(!data.success) throw new Error(data.error || 'Detection failed');
-
-    // ── Annotated frame (backend used results[0].plot()) ──────────────
-    const frameWrap = document.getElementById('yolo-frame-wrap');
-    const stageWrap = document.getElementById('yolo-detect-stage');
-    const imgEl     = document.getElementById('yolo-annotated-img');
-    if(data.annotated_frame && imgEl){
-      imgEl.src = 'data:image/jpeg;base64,' + data.annotated_frame;
-      if(frameWrap) frameWrap.style.display = 'block';
-      if(stageWrap) stageWrap.style.display = 'none';
-      const liveBadge = document.getElementById('yolo-live-badge');
-      if(liveBadge) liveBadge.style.display = '';
-    }
-
-    // ── Download annotated output (mirrors reference repo output) ─────
-    if(data.download_token && dlBtn){
-      const dlName = data.download_filename || (data.is_image ? 'annotated_traffic.jpg' : 'vehicle_detection_output.mp4');
-      dlBtn.href = '/api/yolo/download/' + data.download_token;
-      dlBtn.setAttribute('download', dlName);
-      dlBtn.innerHTML = data.is_image ? '⬇ Download Annotated Image' : '⬇ Download Annotated Video';
-      Object.assign(dlBtn.style, {
-        display:'flex', alignItems:'center', gap:'8px', justifyContent:'center',
-        marginBottom:'18px', background:'rgba(23,178,106,0.12)',
-        border:'1px solid var(--green)', color:'var(--green)', borderRadius:'10px',
-        padding:'10px 16px', fontWeight:'700', fontSize:'13px', textDecoration:'none'
+    // Upload with progress tracking via apiUpload or XMLHttpRequest
+    let uploadResp;
+    if(window.apiUpload){
+      uploadResp = await window.apiUpload('/api/yolo/detect', formData, (pct) => {
+        if(progBar) progBar.style.width = Math.min(pct, 100) + '%';
+        if(progPct) progPct.textContent = Math.round(pct) + '%';
+        if(progDet) progDet.textContent = `Uploaded ${Math.round(pct)}% of ${_yoloFile.name}`;
       });
+    } else {
+      const res = await fetch('/api/yolo/detect', { method: 'POST', body: formData });
+      uploadResp = await res.json();
     }
 
-    // ── KPI cards ──────────────────────────────────────────────────────
-    if(statusEl){ statusEl.textContent = 'Done ✓'; statusEl.style.color = 'var(--green)'; }
-    const totalEl = document.getElementById('yolo-kpi-total');
-    if(totalEl){ totalEl.dataset.count = data.total; totalEl.dataset.done = ''; totalEl.textContent = '0'; }
-    const dColors = { High:'var(--red)', Medium:'var(--orange)', Low:'var(--green)' };
-    const densityEl = document.getElementById('yolo-kpi-density');
-    if(densityEl){ densityEl.textContent = data.density; densityEl.style.color = dColors[data.density]||'var(--text)'; }
-    const framesEl = document.getElementById('yolo-kpi-frames');
-    if(framesEl) framesEl.textContent = data.total_frames_sampled + ' / ' + data.video_total_frames;
-    animateCounters(document.getElementById('page-yolo'));
-
-    // ── Emergency banner ───────────────────────────────────────────────
-    const emergBanner = document.getElementById('yolo-emergency-banner');
-    if(emergBanner) emergBanner.style.display = data.emergency_detected ? 'block' : 'none';
-    if(data.emergency_detected)
-      showToast('error', '⚠️ Priority Vehicle', 'Large bus/truck detected — recommend green-phase extension.');
-
-    // ── Vehicle count breakdown ────────────────────────────────────────
-    const VCOL = { Car:'#17B26A', Bus:'#2D7CFF', Truck:'#F79009', Motorcycle:'#F04438', Bicycle:'#EAB308' };
-    const counts = data.all_counts || {};
-    const total  = data.total || 0;
-    const summaryEl = document.getElementById('yolo-summary');
-    if(summaryEl){
-      if(total > 0){
-        summaryEl.innerHTML = Object.entries(counts).map(([label, count]) => {
-          const pct   = total > 0 ? Math.round(count / total * 100) : 0;
-          const color = VCOL[label] || '#5B6B8C';
-          return `<div style="margin-bottom:12px;">
-            <div class="flex justify-between items-center" style="font-size:12px;font-weight:700;margin-bottom:6px;">
-              <span class="flex items-center gap-8"><span class="legend-swatch" style="background:${color};"></span>${label}</span>
-              <span class="text-dim">${count} · ${pct}%</span>
-            </div>
-            <div class="pbar-track" style="margin-bottom:0;height:6px;">
-              <div class="pbar-fill" style="background:${color};width:${pct}%;"></div>
-            </div></div>`;
-        }).join('');
-        const sepEl   = document.getElementById('yolo-total-sep');
-        const totRow  = document.getElementById('yolo-total-row');
-        const totDisp = document.getElementById('yolo-total-display');
-        if(sepEl)   sepEl.style.display  = '';
-        if(totRow)  totRow.style.removeProperty('display');
-        if(totDisp) totDisp.textContent  = (!data.is_image && data.line_crossed_total > 0) ? `${total} vehicles crossed tripwire` : `${total} vehicles`;
-      } else {
-        summaryEl.innerHTML = '<div class="text-dim" style="font-size:12px;text-align:center;padding:20px 0;">No vehicles detected — try lowering confidence threshold.</div>';
-      }
+    if(!uploadResp || !uploadResp.success){
+      throw new Error((uploadResp && uploadResp.error) || 'Upload failed');
     }
 
-    // ── Traffic priority card ──────────────────────────────────────────
-    renderYoloPriorityCard(data);
+    const jobId = uploadResp.job_id;
+    _currentYoloJobId = jobId;
 
-    // ── Per-frame trend chart ──────────────────────────────────────────
-    if(data.frame_results && data.frame_results.length){
-      const ex = CHART_REGISTRY['chart-yolo-trend'];
-      if(ex){
-        ex.data.labels = data.frame_labels;
-        ex.data.datasets[0].data  = data.frame_results;
-        ex.data.datasets[0].label = 'Vehicles detected';
-        ex.update();
-      } else {
-        mkChart('chart-yolo-trend',{
-          type:'line',
-          data:{ labels:data.frame_labels, datasets:[{
-            label:'Vehicles detected', data:data.frame_results,
-            borderColor:'#2D7CFF', backgroundColor:'rgba(45,124,255,0.10)',
-            fill:true, tension:0.4, borderWidth:2.5, pointRadius:3, pointBackgroundColor:'#2D7CFF'
-          }]},
-          options:{ responsive:true, maintainAspectRatio:false,
-            plugins:{tooltip:{callbacks:{label:i=>`  Vehicles: ${i.raw}`}}},
-            scales:{ y:{min:0,grid:gridOpt(),border:{display:false}}, x:{grid:{display:false},border:{display:false}} }
-          }
-        });
-      }
-    }
+    btnText.textContent = 'Processing…';
+    if(statusEl){ statusEl.textContent = 'Processing…'; statusEl.style.color = 'var(--orange)'; }
+    if(progLbl) progLbl.textContent = 'YOLOv8 + ByteTrack analysis in progress...';
 
-    const toastMsg = (!data.is_image && data.line_crossed_total > 0) 
-      ? `${total} vehicles crossed line · Peak in frame: ${data.peak_vehicles} · Density: ${data.density}`
-      : `${total} vehicles · Density: ${data.density} · Conf: ${data.conf_used}`;
-    showToast('success', 'Detection complete', toastMsg);
+    // Poll status until completion
+    await pollYoloJob(jobId);
 
   } catch(err){
-    console.error('[YOLO]', err);
-    showToast('error', 'Detection failed', err.message || 'Server error');
+    console.error('[YOLO Detect Error]', err);
     if(statusEl){ statusEl.textContent = 'Error'; statusEl.style.color = 'var(--red)'; }
+    if(progWrap) progWrap.style.display = 'none';
+    if(errWrap){
+      errWrap.style.display = 'block';
+      const msgEl = document.getElementById('yolo-error-msg');
+      if(msgEl) msgEl.textContent = err.message || 'Detection failed. Please check server logs.';
+    }
+    showToast('error', 'Detection Failed', err.message || 'Unexpected server response');
   } finally {
     btn.disabled = false;
     btnText.textContent = 'Run YOLOv8 Detection';
@@ -2135,6 +2925,232 @@ async function runYoloDetection(){
   }
 }
 window.runYoloDetection = runYoloDetection;
+
+function retryYoloDetection(){
+  const errWrap = document.getElementById('yolo-error-wrap');
+  if(errWrap) errWrap.style.display = 'none';
+  runYoloDetection();
+}
+window.retryYoloDetection = retryYoloDetection;
+
+async function cancelYoloDetection(){
+  if(_yoloPollTimer) clearTimeout(_yoloPollTimer);
+  if(_currentYoloJobId){
+    try {
+      await fetch(`/api/yolo/job/${_currentYoloJobId}`, { method: 'DELETE' });
+    } catch(e){}
+    _currentYoloJobId = null;
+  }
+  const progWrap = document.getElementById('yolo-progress-wrap');
+  if(progWrap) progWrap.style.display = 'none';
+  const statusEl = document.getElementById('yolo-kpi-status');
+  if(statusEl){ statusEl.textContent = 'Ready'; statusEl.style.color = 'var(--green)'; }
+  const btn = document.getElementById('yolo-detect-btn');
+  const btnText = document.getElementById('yolo-detect-btn-text');
+  const spinner = document.getElementById('yolo-spinner');
+  if(btn) btn.disabled = false;
+  if(btnText) btnText.textContent = 'Run YOLOv8 Detection';
+  if(spinner) spinner.style.display = 'none';
+  showToast('info', 'Detection Cancelled', 'Detection job was cancelled.');
+}
+window.cancelYoloDetection = cancelYoloDetection;
+
+async function pollYoloJob(jobId){
+  return new Promise((resolve, reject) => {
+    async function check(){
+      try {
+        const stat = await apiFetch(`/api/yolo/status/${jobId}`);
+        if(!stat){
+          _yoloPollTimer = setTimeout(check, 1000);
+          return;
+        }
+
+        const progBar = document.getElementById('yolo-progress-bar');
+        const progPct = document.getElementById('yolo-progress-pct');
+        const progLbl = document.getElementById('yolo-progress-label');
+        const progDet = document.getElementById('yolo-progress-detail');
+
+        const pct = stat.progress || 0;
+        if(progBar) progBar.style.width = pct + '%';
+        if(progPct) progPct.textContent = pct + '%';
+        if(progLbl) progLbl.textContent = stat.state === 'running'
+          ? `Processing frame ${stat.frames_done || 0} / ${stat.frames_total || '?'}`
+          : (stat.state === 'queued' ? 'Job queued in background...' : 'Finalizing output...');
+        if(progDet){
+          progDet.textContent = stat.eta_s !== undefined
+            ? `Estimated time remaining: ${Math.round(stat.eta_s)}s`
+            : `State: ${stat.state}`;
+        }
+
+        const sState = (stat.state || '').toLowerCase();
+        if(sState === 'completed' || sState === 'done'){
+          const pWrap = document.getElementById('yolo-progress-wrap');
+          if(pWrap) pWrap.style.display = 'none';
+          await handleYoloJobComplete(jobId);
+          resolve();
+        } else if(sState === 'failed' || sState === 'error' || sState === 'cancelled'){
+          const pWrap = document.getElementById('yolo-progress-wrap');
+          if(pWrap) pWrap.style.display = 'none';
+          reject(new Error(stat.error || 'YOLO worker processing failed'));
+        } else {
+          _yoloPollTimer = setTimeout(check, 1000);
+        }
+      } catch(e){
+        reject(e);
+      }
+    }
+    check();
+  });
+}
+
+async function handleYoloJobComplete(jobId){
+  const data = await apiFetch(`/api/yolo/result/${jobId}`);
+  if(!data) throw new Error('Could not retrieve detection results');
+
+  const statusEl = document.getElementById('yolo-kpi-status');
+  if(statusEl){ statusEl.textContent = 'Done ✓'; statusEl.style.color = 'var(--green)'; }
+
+  // ── Show Annotated Result Output ─────────────────────────
+  const frameWrap = document.getElementById('yolo-frame-wrap');
+  const stageWrap = document.getElementById('yolo-detect-stage');
+  const videoEl   = document.getElementById('yolo-annotated-video');
+  const imgEl     = document.getElementById('yolo-annotated-img');
+  const liveBadge = document.getElementById('yolo-live-badge');
+  const dlBtn     = document.getElementById('yolo-download-btn');
+
+  if(data.is_image){
+    if(imgEl){
+      imgEl.src = data.annotated_frame ? 'data:image/jpeg;base64,' + data.annotated_frame : `/api/yolo/thumbnail/${jobId}`;
+      imgEl.style.display = 'block';
+    }
+    if(videoEl) videoEl.style.display = 'none';
+  } else {
+    if(videoEl){
+      videoEl.src = `/api/yolo/video/${jobId}`;
+      videoEl.style.display = 'block';
+      videoEl.load();
+    }
+    if(imgEl) imgEl.style.display = 'none';
+  }
+
+  if(frameWrap) frameWrap.style.display = 'block';
+  if(stageWrap) stageWrap.style.display = 'none';
+  if(liveBadge) liveBadge.style.display = '';
+
+  if(dlBtn){
+    dlBtn.href = `/api/yolo/video/${jobId}?download=1`;
+    dlBtn.setAttribute('download', data.is_image ? 'annotated_traffic.jpg' : 'annotated_traffic.mp4');
+    dlBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download Annotated ${data.is_image ? 'Image' : 'H.264 Video'}`;
+    dlBtn.style.display = 'flex';
+  }
+
+  // ── KPI Cards ────────────────────────────────────────────
+  const totalVehicles = data.line_crossed_total !== undefined ? data.line_crossed_total : (data.total || 0);
+  const totalEl = document.getElementById('yolo-kpi-total');
+  if(totalEl){
+    totalEl.dataset.count = totalVehicles;
+    totalEl.dataset.done = '';
+    totalEl.textContent = totalVehicles.toLocaleString('en-IN');
+  }
+  const totalLbl = document.getElementById('yolo-kpi-total-label');
+  if(totalLbl){
+    totalLbl.textContent = data.is_image ? 'Total Vehicles' : `Total Vehicles (Tripwire · ${data.unique_tracks || totalVehicles} unique)`;
+  }
+
+  const densityEl = document.getElementById('yolo-kpi-density');
+  const dColors = { High: 'var(--red)', Medium: 'var(--orange)', Low: 'var(--green)' };
+  if(densityEl){
+    densityEl.textContent = data.density || 'Low';
+    densityEl.style.color = dColors[data.density] || 'var(--text)';
+  }
+
+  const framesEl = document.getElementById('yolo-kpi-frames');
+  if(framesEl){
+    framesEl.textContent = `${data.total_frames_sampled || data.frames_analysed || 0} / ${data.video_total_frames || '—'}`;
+  }
+
+  // ── Vehicle Count Breakdown ──────────────────────────────
+  const VCOL = { Car: '#17B26A', Bus: '#2D7CFF', Truck: '#F79009', Motorcycle: '#F04438', Bicycle: '#EAB308' };
+  const counts = data.all_counts || {};
+  const inOut = data.line_crossing_in_out || {};
+  const totalCount = Object.values(counts).reduce((a, b) => a + b, 0);
+  const summaryEl = document.getElementById('yolo-summary');
+  if(summaryEl){
+    if(totalCount > 0){
+      summaryEl.innerHTML = Object.entries(counts).map(([label, count]) => {
+        const pct   = totalCount > 0 ? Math.round((count / totalCount) * 100) : 0;
+        const color = VCOL[label] || '#5B6B8C';
+        const io = inOut[label] ? ` (${inOut[label].in || 0} IN / ${inOut[label].out || 0} OUT)` : '';
+        return `<div style="margin-bottom:12px;">
+          <div class="flex justify-between items-center" style="font-size:12px;font-weight:700;margin-bottom:6px;">
+            <span class="flex items-center gap-8"><span class="legend-swatch" style="background:${color};"></span>${label}${io}</span>
+            <span class="text-dim">${count} · ${pct}%</span>
+          </div>
+          <div class="pbar-track" style="margin-bottom:0;height:6px;">
+            <div class="pbar-fill" style="background:${color};width:${pct}%;"></div>
+          </div></div>`;
+      }).join('');
+      const sepEl   = document.getElementById('yolo-total-sep');
+      const totRow  = document.getElementById('yolo-total-row');
+      const totDisp = document.getElementById('yolo-total-display');
+      if(sepEl)   sepEl.style.display  = '';
+      if(totRow)  totRow.style.removeProperty('display');
+      if(totDisp) totDisp.textContent  = `${totalVehicles} vehicles crossed tripwire`;
+    } else {
+      summaryEl.innerHTML = '<div class="text-dim" style="font-size:12px;text-align:center;padding:20px 0;">No vehicles detected in footage.</div>';
+    }
+  }
+
+  // ── Priority Decision Card ───────────────────────────────
+  renderYoloPriorityCard(data);
+
+  // ── Per-Frame / Per-Second Detection Trend Chart ─────────
+  if(data.frame_results && data.frame_results.length){
+    const ex = CHART_REGISTRY['chart-yolo-trend'];
+    if(ex){
+      ex.data.labels = data.frame_labels;
+      ex.data.datasets[0].data  = data.frame_results;
+      ex.data.datasets[0].label = 'Vehicles detected';
+      ex.update();
+    } else {
+      mkChart('chart-yolo-trend', {
+        type: 'line',
+        data: {
+          labels: data.frame_labels,
+          datasets: [{
+            label: 'Vehicles detected',
+            data: data.frame_results,
+            borderColor: '#2D7CFF',
+            backgroundColor: 'rgba(45,124,255,0.10)',
+            fill: true,
+            tension: 0.35,
+            borderWidth: 2,
+            pointRadius: 2,
+            pointBackgroundColor: '#2D7CFF'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: i => `  Vehicles in frame: ${i.raw}`
+              }
+            }
+          },
+          scales: {
+            y: { min: 0, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#94a3b8' } },
+            x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
+          }
+        }
+      });
+    }
+  }
+
+  showToast('success', 'Detection Complete', `${totalVehicles} vehicles counted · Traffic density: ${data.density || 'Low'}`);
+}
+window.handleYoloJobComplete = handleYoloJobComplete;
 
 function renderYoloPriorityCard(data){
   const el = document.getElementById('yolo-priority-output');
@@ -2148,15 +3164,15 @@ function renderYoloPriorityCard(data){
   let prDesc   = 'Traffic flow is normal. No special signal priority needed.';
   let action   = 'Maintain standard signal cycle.';
   if(data.emergency_detected || busCount >= 3){
-    priority = 'HIGH — Bus/Truck Priority';
+    priority = 'HIGH — Heavy Vehicle Priority';
     prColor  = 'red';
-    prDesc   = `${busCount} buses · ${truckCount} trucks detected in frame.`;
+    prDesc   = `${busCount} buses · ${truckCount} trucks detected in corridor.`;
     action   = 'Extend green phase +25 sec for heavy vehicle lane.';
   } else if(data.density === 'High'){
     priority = 'MEDIUM — Congestion Alert';
     prColor  = 'orange';
     prDesc   = `High vehicle density (${total} total). Congestion likely.`;
-    action   = 'Adaptive signal extension + traffic warden deployment.';
+    action   = 'Adaptive signal extension + traffic warden alert.';
   } else if(data.density === 'Medium'){
     priority = 'LOW — Moderate Traffic';
     prColor  = 'blue';
